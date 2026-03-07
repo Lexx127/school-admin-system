@@ -102,7 +102,10 @@ def get_my_notices(
     elif current_user.role == UserRole.PARENT:  # type: ignore
         parent = db.query(Parent).filter(Parent.user_id == current_user.id).first()
         if parent and parent.student_associations:
-            user_class_id = parent.student_associations[0].student.class_id
+            user_class_id = [
+                assoc.student.class_id 
+                for assoc in parent.student_associations
+            ]
 
     elif current_user.role == UserRole.TEACHER:  # type: ignore
         staff = db.query(Staff).filter(Staff.user_id == current_user.id).first()
@@ -122,8 +125,10 @@ def get_my_notices(
             visible_notices.append(n)
         elif n.audience == NoticeAudience.PARENTS and current_user.role == UserRole.PARENT:  # type: ignore
             visible_notices.append(n)
-        elif n.audience == NoticeAudience.CLASS and n.target_class_id == user_class_id:  # type: ignore
-            visible_notices.append(n)
+        elif n.audience == NoticeAudience.CLASS:  # type: ignore
+            check_ids = user_class_id if isinstance(user_class_id, list) else [user_class_id]
+            if n.target_class_id in check_ids:
+                visible_notices.append(n)
 
     result = []
     for n in visible_notices:
@@ -276,6 +281,20 @@ def get_upcoming_events(
             show = True
         elif e.audience == NoticeAudience.PARENTS and current_user.role == UserRole.PARENT:  # type: ignore
             show = True
+        elif e.audience == NoticeAudience.CLASS:  # type: ignore
+            from models import Student, Parent
+            if current_user.role == UserRole.STUDENT:  # type: ignore
+                student = db.query(Student).filter(Student.user_id == current_user.id).first()
+                if student and student.class_id == e.target_class_id: # type: ignore
+                    show = True
+            elif current_user.role == UserRole.PARENT:  # type: ignore
+                parent = db.query(Parent).filter(Parent.user_id == current_user.id).first()
+                if parent:
+                    class_ids = [a.student.class_id for a in parent.student_associations]
+                    if e.target_class_id in class_ids:
+                        show = True
+            elif current_user.role in [UserRole.TEACHER, UserRole.PRINCIPAL, UserRole.SUPER_ADMIN]:  # type: ignore
+                show = True
 
         if show:
             result.append({

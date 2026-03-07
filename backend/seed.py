@@ -25,8 +25,8 @@ def clear_data():
     db.query(ClassSubject).delete()
     db.query(Student).delete()
     db.query(Parent).delete()
-    db.query(Staff).delete()
     db.query(Class).delete()
+    db.query(Staff).delete()
     db.query(Subject).delete()
     db.query(SchoolSettings).delete()
     db.query(User).delete()
@@ -764,7 +764,7 @@ def seed():
         create_attendance(students, teachers)
         create_notices_and_events(principal_user, teachers)
 
-        print("\n✅ Database seeded successfully!")
+        print("\n[SUCCESS] Database seeded successfully!")
         print("\n--- Login Credentials ---")
         print("Super Admin  : admin@standrews.ac.zw        / admin123")
         print("Principal    : principal@standrews.ac.zw    / principal123")
@@ -777,7 +777,7 @@ def seed():
 
     except Exception as e:
         db.rollback()
-        print(f"\n❌ Seeding failed: {e}")
+        print(f"\n[ERROR] Seeding failed: {e}")
         raise
     finally:
         db.close()

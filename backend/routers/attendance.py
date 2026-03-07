@@ -4,7 +4,7 @@ from database import get_db
 from models import (
     User, Staff, Student, StudentAttendance,
     StaffClockIn, Class, ClassSubject,
-    AttendanceStatus, UserRole
+    AttendanceStatus, UserRole, Parent, ParentStudent
 )
 from auth import get_current_user, require_role
 from datetime import date, datetime, timedelta
@@ -158,8 +158,6 @@ def get_child_attendance(
     db: Session = Depends(get_db)
 ):
     # Verify this parent is linked to this student
-    parent = db.query(Staff).filter(Staff.user_id == current_user.id).first()
-    from models import Parent, ParentStudent
     parent = db.query(Parent).filter(Parent.user_id == current_user.id).first()
     if not parent:
         raise HTTPException(status_code=404, detail="Parent profile not found")
