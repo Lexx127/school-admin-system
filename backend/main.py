@@ -6,7 +6,7 @@ from models import User
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from pydantic import BaseModel
 import os
-from routers import users, attendance, homework
+from routers import users, attendance, homework, grades
 
 app = FastAPI(title="School Admin System")
 
@@ -22,7 +22,7 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(attendance.router)
 app.include_router(homework.router)
-
+app.include_router(grades.router)
 # --- Pydantic Schemas ---
 class LoginRequest(BaseModel):
     email: str
