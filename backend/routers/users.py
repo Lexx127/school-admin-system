@@ -3,9 +3,12 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import (
     User, Staff, Student, Parent, Class,
-    ClassSubject, Subject, UserRole
+    ClassSubject, Subject, UserRole, ParentStudent
 )
-from auth import get_current_user, require_role
+from auth import get_current_user, require_role, hash_password
+from pydantic import BaseModel
+from typing import Optional
+from datetime import date
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -202,4 +205,237 @@ def get_principal_dashboard(
         "classes": classes_summary,
         "staff": staff_summary
     }
+
+# --- Pydantic Schemas for Admin ---
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    role: UserRole
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+
+
+class StudentCreate(BaseModel):
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    student_number: str
+    date_of_birth: Optional[str] = None
+    grade_level: str
+    class_id: int
+
+
+class StaffCreate(BaseModel):
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    role: UserRole
+    employee_number: str
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    primary_subject_id: Optional[int] = None
+
+
+class ParentCreate(BaseModel):
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    whatsapp_number: Optional[str] = None
+
+
+class ParentStudentLink(BaseModel):
+    parent_id: int
+    student_id: int
+    relationship_type: Optional[str] = None
+
+
+# --- Create Student Account (Admin only) ---
+@router.post("/admin/create/student")
+def create_student(
+    request: StudentCreate,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    existing = db.query(User).filter(User.email == request.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=request.email,
+        password_hash=hash_password(request.password),
+        role=UserRole.STUDENT,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        is_active=True
+    )
+    db.add(user)
+    db.commit()
+
+    student = Student(
+        user_id=user.id,
+        student_number=request.student_number,
+        grade_level=request.grade_level,
+        class_id=request.class_id
+    )
+    db.add(student)
+    db.commit()
+
+    return {
+        "message": "Student account created successfully",
+        "user_id": user.id,
+        "student_number": request.student_number
+    }
+
+
+# --- Create Staff Account (Admin only) ---
+@router.post("/admin/create/staff")
+def create_staff(
+    request: StaffCreate,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    existing = db.query(User).filter(User.email == request.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=request.email,
+        password_hash=hash_password(request.password),
+        role=request.role,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        is_active=True
+    )
+    db.add(user)
+    db.commit()
+
+    staff = Staff(
+        user_id=user.id,
+        employee_number=request.employee_number,
+        department=request.department,
+        job_title=request.job_title,
+        primary_subject_id=request.primary_subject_id
+    )
+    db.add(staff)
+    db.commit()
+
+    return {
+        "message": "Staff account created successfully",
+        "user_id": user.id,
+        "employee_number": request.employee_number
+    }
+
+
+# --- Create Parent Account (Admin only) ---
+@router.post("/admin/create/parent")
+def create_parent(
+    request: ParentCreate,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    existing = db.query(User).filter(User.email == request.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=request.email,
+        password_hash=hash_password(request.password),
+        role=UserRole.PARENT,
+        first_name=request.first_name,
+        last_name=request.last_name,
+        phone=request.phone,
+        is_active=True
+    )
+    db.add(user)
+    db.commit()
+
+    parent = Parent(
+        user_id=user.id,
+        whatsapp_number=request.whatsapp_number
+    )
+    db.add(parent)
+    db.commit()
+
+    return {
+        "message": "Parent account created successfully",
+        "user_id": user.id
+    }
+
+
+# --- Link Parent to Student (Admin only) ---
+@router.post("/admin/link/parent-student")
+def link_parent_student(
+    request: ParentStudentLink,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    existing = db.query(ParentStudent).filter(
+        ParentStudent.parent_id == request.parent_id,
+        ParentStudent.student_id == request.student_id
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="This parent is already linked to this student"
+        )
+
+    association = ParentStudent(
+        parent_id=request.parent_id,
+        student_id=request.student_id,
+        relationship_type=request.relationship_type
+    )
+    db.add(association)
+    db.commit()
+
+    return {"message": "Parent linked to student successfully"}
+
+
+# --- Deactivate or Reactivate a User (Admin only) ---
+@router.put("/admin/toggle-active/{user_id}")
+def toggle_user_active(
+    user_id: int,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_active = not user.is_active  # type: ignore
+    db.commit()
+
+    status = "activated" if user.is_active else "deactivated" # type: ignore
+    return {
+        "message": f"User {status} successfully",
+        "user_id": user_id,
+        "is_active": user.is_active
+    }
+
+
+# --- Get All Users (Admin only) ---
+@router.get("/admin/all")
+def get_all_users(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
+    db: Session = Depends(get_db)
+):
+    users = db.query(User).order_by(User.role, User.last_name).all()
+
+    return [
+        {
+            "user_id": u.id,
+            "email": u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "role": u.role,
+            "is_active": u.is_active,
+            "created_at": u.created_at
+        }
+        for u in users
+    ]
 
