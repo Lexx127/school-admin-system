@@ -12,7 +12,13 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: 'An error occurred' }))
-    throw new Error(error.detail || 'An error occurred')
+    const detail = error.detail
+    const message = Array.isArray(detail)
+      ? detail.map(e => `${e.loc?.slice(-1)[0]}: ${e.msg}`).join(', ')
+      : typeof detail === 'string'
+      ? detail
+      : 'An error occurred'
+    throw new Error(message)
   }
 
   return res.json()
