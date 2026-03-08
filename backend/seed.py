@@ -66,6 +66,7 @@ def create_school_settings():
             value="123 School Road, Harare",
             description="Physical address of the school"
         ),
+        SchoolSettings(key="kiosk_code", value="1234"),
     ]
     db.add_all(settings)
     db.commit()

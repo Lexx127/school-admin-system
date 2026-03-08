@@ -110,7 +110,7 @@ def get_my_notices(
     elif current_user.role == UserRole.TEACHER:  # type: ignore
         staff = db.query(Staff).filter(Staff.user_id == current_user.id).first()
         if staff and staff.homeroom_class:
-            user_class_id = staff.homeroom_class.id  # type: ignore
+            user_class_id = staff.homeroom_class[0].id if staff.homeroom_class else None  # type: ignore
 
     # Filter notices by audience
     visible_notices = []

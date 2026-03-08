@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
+from sqlalchemy import func
 from models import (
     User, Staff, Student, StudentAttendance,
     StaffClockIn, Class, ClassSubject,
@@ -319,3 +320,114 @@ def get_all_staff_clockins(
         "flagged_count": flagged_count,
         "records": result
     }
+
+@router.post("/staff/kiosk")
+def kiosk_clock_action(
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Kiosk endpoint — authenticates a staff member and clocks them in or out
+    in a single request without creating a session cookie.
+    """
+    from auth import verify_password
+    from models import SchoolSettings
+
+    email = payload.get("email", "").strip().lower()
+    password = payload.get("password", "")
+    action = payload.get("action", "in")
+    kiosk_code = payload.get("kiosk_code", "")
+
+    # Verify kiosk access code
+    setting = db.query(SchoolSettings).filter(
+        SchoolSettings.key == "kiosk_code"
+    ).first()
+    expected_code = setting.value if setting else "1234"
+    if kiosk_code != expected_code:
+        raise HTTPException(status_code=403, detail="Invalid kiosk access code")
+
+    # Authenticate the staff member
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(password, user.password_hash): # type: ignore
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.role not in [UserRole.TEACHER, UserRole.PRINCIPAL, UserRole.SUPER_ADMIN]:  # type: ignore
+        raise HTTPException(status_code=403, detail="Only staff can use the kiosk")
+
+    staff = db.query(Staff).filter(Staff.user_id == user.id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff record not found")
+
+    now = datetime.now()
+    today = now.date()
+    time_str = now.strftime("%H:%M")
+
+    if action == "in":
+        # Check if already clocked in today
+        existing = db.query(StaffClockIn).filter(
+            StaffClockIn.staff_id == staff.id,
+            func.date(StaffClockIn.clock_in_time) == today
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{user.first_name} has already clocked in today at {existing.clock_in_time.strftime('%H:%M')}"
+            )
+
+        # Check if late
+        deadline_str = "07:30"
+        deadline_setting = db.query(SchoolSettings).filter(
+            SchoolSettings.key == "clockin_deadline"
+        ).first()
+        if deadline_setting:
+            deadline_str = deadline_setting.value
+        deadline_hour, deadline_min = map(int, deadline_str.split(":"))
+        deadline = now.replace(hour=deadline_hour, minute=deadline_min, second=0, microsecond=0)
+        flagged = now > deadline
+
+        record = StaffClockIn(
+            staff_id=staff.id,
+            clock_in_time=now,
+            flagged=flagged,
+            flag_reason=f"Arrived late - {time_str}" if flagged else None
+        )
+        db.add(record)
+        db.commit()
+
+        return {
+            "success": True,
+            "action": "in",
+            "staff_name": f"{user.first_name} {user.last_name}",
+            "time": time_str,
+            "flagged": flagged,
+            "message": f"Clocked in at {time_str}" + (" — Late arrival" if flagged else "")
+        }
+
+    elif action == "out":
+        record = db.query(StaffClockIn).filter(
+            StaffClockIn.staff_id == staff.id,
+            func.date(StaffClockIn.clock_in_time) == today
+        ).first()
+        if not record:
+            raise HTTPException(status_code=400, detail="No clock-in record found for today")
+        if record.clock_out_time: # type: ignore
+            raise HTTPException(
+                status_code=400,
+                detail=f"{user.first_name} has already clocked out today at {record.clock_out_time.strftime('%H:%M')}"
+            )
+
+        record.clock_out_time = now # type: ignore
+        db.commit()
+
+        return {
+            "success": True,
+            "action": "out",
+            "staff_name": f"{user.first_name} {user.last_name}",
+            "time": time_str,
+            "flagged": False,
+            "message": f"Clocked out at {time_str}"
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action — must be 'in' or 'out'")
+    
