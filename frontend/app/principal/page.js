@@ -4,9 +4,16 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function PrincipalDashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
+
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+
   const [dashboard, setDashboard] = useState(null)
   const [clockins, setClockIns] = useState([])
   const [gradeSummary, setGradeSummary] = useState([])
@@ -33,6 +40,12 @@ export default function PrincipalDashboard() {
   const [parentSearch, setParentSearch] = useState('')
   const [showParentDropdown, setShowParentDropdown] = useState(false)
   const [staffSearch, setStaffSearch] = useState('')
+  const [allSubjects, setAllSubjects] = useState([])
+  const [classAssignments, setClassAssignments] = useState([])
+  const [submitting, setSubmitting] = useState(false)
+  const [timetableSlots, setTimetableSlots] = useState([])
+  const [schoolSettings, setSchoolSettings] = useState({})
+  const [timetableForm, setTimetableForm] = useState({ class_subject_id: '', cycle_day: 1, period_number: 1 })
 
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -43,7 +56,7 @@ export default function PrincipalDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      const [userData, dashData, clockinData, gradeData, noticeData, eventData, usersData, feesData, studentsData, parentsData, inboxData] =
+      const [userData, dashData, clockinData, gradeData, noticeData, eventData, usersData, feesData, studentsData, parentsData, inboxData, subjectsData, assignmentsData, slotsData, settingsData] =
         await Promise.allSettled([
           api.get('/auth/me'),
           api.get('/users/principal/dashboard'),
@@ -56,6 +69,10 @@ export default function PrincipalDashboard() {
           api.get('/users/students/all'),
           api.get('/users/parents/with-students'),
           api.get('/communications/inbox'),
+          api.get('/classes/all-subjects'),
+          api.get('/classes/all-assignments'),
+          api.get('/timetable/all'),
+          api.get('/settings/'),
         ])
 
       if (userData.status === 'rejected') { router.push('/'); return }
@@ -71,6 +88,10 @@ export default function PrincipalDashboard() {
       if (studentsData.status === 'fulfilled') setStudents(studentsData.value)
       if (parentsData.status === 'fulfilled') setParentsList(parentsData.value)
       if (inboxData.status === 'fulfilled') setInbox(inboxData.value)
+      if (subjectsData?.status === 'fulfilled') setAllSubjects(subjectsData.value)
+      if (assignmentsData?.status === 'fulfilled') setClassAssignments(assignmentsData.value)
+      if (slotsData?.status === 'fulfilled') setTimetableSlots(slotsData.value)
+      if (settingsData?.status === 'fulfilled') setSchoolSettings(settingsData.value)
 
       setLoading(false)
     }
@@ -147,6 +168,48 @@ export default function PrincipalDashboard() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--off-white)' }}>
 
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontFamily: 'var(--font-playfair)', fontSize: '20px', marginBottom: '16px', color: 'var(--text-dark)', textAlign: 'left' }}>Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (passwordForm.new_password !== passwordForm.confirm_password) {
+                return alert("New passwords do not match!")
+              }
+              try {
+                const res = await api.put('/auth/change-password', {
+                  current_password: passwordForm.current_password,
+                  new_password: passwordForm.new_password
+                })
+                alert("Password changed successfully!")
+                setShowPasswordModal(false)
+                setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+              } catch (err) { alert(err.message) }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Current Password</label>
+                <input type="password" required value={passwordForm.current_password} onChange={e => setPasswordForm({...passwordForm, current_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.new_password} onChange={e => setPasswordForm({...passwordForm, new_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Confirm New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.confirm_password} onChange={e => setPasswordForm({...passwordForm, confirm_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowPasswordModal(false)} style={{ padding: '10px 16px', border: '1px solid #d1d5db', background: 'white', color: 'var(--text-dark)', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Cancel</button>
+                <button type="submit" style={{ padding: '10px 16px', border: 'none', background: 'var(--blue-deep)', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Update Password</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
       {/* SIDEBAR */}
       <div style={{
         width: '260px', background: 'var(--blue-deep)',
@@ -187,6 +250,7 @@ export default function PrincipalDashboard() {
               { name: 'All Classes', icon: '🏫' },
               { name: 'Fees Management', icon: '💰' },
               { name: 'Notices & Events', icon: '🔔' },
+              { name: 'School Timetable', icon: '⏳' },
               { name: 'Communications', icon: '💬' },
             ]},
           ].map(section => (
@@ -224,8 +288,23 @@ export default function PrincipalDashboard() {
 
         <div style={{
           padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', gap: '12px',
+          display: 'flex', alignItems: 'center', gap: '12px', position: 'relative',
         }}>
+          {showProfileDropdown && (
+            <div style={{
+               position: 'absolute', bottom: '100%', left: '16px', right: '16px',
+               background: 'white', borderRadius: '8px', padding: '8px', marginBottom: '8px',
+               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 20
+            }}>
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setShowProfileDropdown(false); }} 
+                  style={{ width: '100%', padding: '10px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', fontWeight: '600', color: 'var(--text-dark)', cursor: 'pointer', borderRadius: '6px' }}
+                  onMouseOver={(e) => e.target.style.background = '#f5f6fa'}
+                  onMouseOut={(e) => e.target.style.background = 'none'}
+               >Change Password</button>
+            </div>
+          )}
+          <div onClick={() => setShowProfileDropdown(!showProfileDropdown)} style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }}>
           <div style={{
             width: '36px', height: '36px', background: 'rgba(37,99,235,0.3)',
             border: '2px solid rgba(37,99,235,0.5)', borderRadius: '50%',
@@ -239,6 +318,7 @@ export default function PrincipalDashboard() {
               {user ? `${user.first_name} ${user.last_name}` : ''}
             </div>
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Principal</div>
+          </div>
           </div>
           <button onClick={handleLogout} style={{
             background: 'none', border: 'none',
@@ -289,7 +369,7 @@ export default function PrincipalDashboard() {
                         {todayClockIns.map((c, i) => (
                           <tr key={i} style={{ borderBottom: '1px solid #f5f6fa' }}>
                             <td style={{ padding: '14px 24px', fontWeight: '500' }}>{c.staff_name}</td>
-                            <td style={{ padding: '14px 24px', color: 'var(--text-muted)' }}>{c.clock_in_time ? new Date(c.clock_in_time).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }) : '—'}</td>
+                            <td style={{ padding: '14px 24px', color: 'var(--text-muted)' }}>{c.clock_in_time ? c.clock_in_time : '—'}</td>
                             <td style={{ padding: '14px 24px' }}><span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', background: c.flagged ? '#fde8e8' : '#e8f8f0', color: c.flagged ? '#c0392b' : '#1a8a4a' }}>{c.flagged ? 'Late' : 'On Time'}</span></td>
                           </tr>
                         ))}
@@ -335,7 +415,7 @@ export default function PrincipalDashboard() {
             <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #eef0f8', overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr style={{ background: '#fafbfc' }}>{['Class', 'Grade', 'Students', 'Teacher'].map(h => <th key={h} style={{ padding: '12px 24px', textAlign: 'left', fontSize: '12px', color: 'var(--text-muted)' }}>{h}</th>)}</tr></thead>
-                <tbody>{dashboard?.classes?.map(c => (<tr key={c.class_id} style={{ borderBottom: '1px solid #f5f6fa' }}><td style={{ padding: '14px 24px', fontSize: '14px' }}>{c.class_name}</td><td style={{ padding: '14px 24px' }}>{c.grade_level}</td><td style={{ padding: '14px 24px' }}>{c.student_count}</td><td style={{ padding: '14px 24px' }}>{c.homeroom_teacher || '—'}</td></tr>))}</tbody>
+                <tbody>{dashboard?.classes?.filter(c => !selectedClassId || c.class_id.toString() === selectedClassId.toString()).map(c => (<tr key={c.class_id} style={{ borderBottom: '1px solid #f5f6fa' }}><td style={{ padding: '14px 24px', fontSize: '14px' }}>{c.class_name}</td><td style={{ padding: '14px 24px' }}>{c.grade_level}</td><td style={{ padding: '14px 24px' }}>{c.student_count}</td><td style={{ padding: '14px 24px' }}>{c.homeroom_teacher || '—'}</td></tr>))}</tbody>
               </table>
             </div>
           </div>
@@ -948,6 +1028,142 @@ export default function PrincipalDashboard() {
                     ))}
                   </div>
                </div>
+            </div>
+          </div>
+        ) : activeTab === 'School Timetable' ? (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)' }}>School Timetable</h2>
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'white', padding: '12px 20px', borderRadius: '12px', border: '1px solid #eef0f8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600' }}>Cycle Length:</label>
+                  <input type="number" readOnly value={schoolSettings.cycle_length || 6} style={{ width: '40px', padding: '4px', border: 'none', background: 'none' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600' }}>Periods/Day:</label>
+                  <input type="number" readOnly value={schoolSettings.periods_per_day || 8} style={{ width: '40px', padding: '4px', border: 'none', background: 'none' }} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: '32px' }}>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', background: '#fafbfc', border: '1px solid #eef0f8' }}>Period</th>
+                      {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, i) => (
+                        <th key={i} style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', background: '#fafbfc', border: '1px solid #eef0f8' }}>Day {i + 1}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: parseInt(schoolSettings.periods_per_day || 8) }).map((_, p) => (
+                      <tr key={p}>
+                        <td style={{ padding: '12px', fontWeight: '700', fontSize: '13px', background: '#fafbfc', border: '1px solid #eef0f8', textAlign: 'center' }}>{p + 1}</td>
+                        {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, d) => {
+                          const slotItems = timetableSlots.filter(s => s.cycle_day === d + 1 && s.period_number === p + 1)
+                          return (
+                            <td key={d} style={{ padding: '4px', border: '1px solid #eef0f8', minWidth: '120px', height: '100px', verticalAlign: 'top' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {slotItems.map(s => (
+                                  <div key={s.id} style={{ padding: '6px', background: 'var(--blue-light)', borderRadius: '6px', fontSize: '10px' }}>
+                                    <div style={{ fontWeight: '700', color: 'var(--blue-deep)' }}>{s.class_name}</div>
+                                    <div style={{ color: 'var(--text-dark)' }}>{s.subject_name}</div>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>{s.teacher_name}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', height: 'fit-content' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '12px' }}>Timetable Status</h3>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>This is a read-only view of the school-wide academic timetable. Use Admin Dashboard to make changes.</p>
+                <div style={{ marginTop: '24px', padding: '16px', background: 'var(--blue-light)', borderRadius: '8px' }}>
+                   <div style={{ fontSize: '12px', color: 'var(--blue-deep)', fontWeight: '700' }}>Active Cycle</div>
+                   <div style={{ fontSize: '14px', fontWeight: '600', marginTop: '4px' }}>{schoolSettings.cycle_length || 6} Days</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'All Classes' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Class-Subject Matrix</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+                <thead>
+                  <tr style={{ background: '#fafbfc', borderBottom: '1px solid #eef0f8' }}>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--text-muted)' }}>Class</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--blue-deep)' }}>Homeroom</th>
+                    {allSubjects.map(sub => (
+                      <th key={sub.id} style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--text-muted)' }}>{sub.name}</th>
+                    ))}
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--blue-deep)' }}>Export</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(dashboard?.class_summaries || []).map(c => (
+                    <tr key={c.class_id} style={{ borderBottom: '1px solid #f5f6fa' }}>
+                      <td style={{ padding: '12px', fontWeight: '600', fontSize: '13px', color: 'var(--text-dark)' }}>{c.class_name}</td>
+                      <td style={{ padding: '8px', background: '#e0f2fe' }}>
+                        <select 
+                          value={c.homeroom_teacher_id || ''}
+                          onChange={async (e) => {
+                            const teacherUserId = parseInt(e.target.value);
+                            try {
+                              await api.put(`/classes/${c.class_id}/homeroom`, { teacher_id: teacherUserId });
+                              const res = await api.get('/users/principal/dashboard');
+                              setDashboard(res);
+                            } catch (err) { alert('Failed to assign homeroom teacher'); }
+                          }}
+                          style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #bae6fd', fontSize: '12px', background: 'white' }}
+                        >
+                          <option value="">-- Unassigned --</option>
+                          {staffUsers.map(t => (
+                            <option key={t.user_id || t.id} value={t.user_id || t.id}>{t.first_name} {t.last_name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      {allSubjects.map(sub => {
+                        const assignment = classAssignments.find(a => a.class_id === c.class_id && a.subject_id === sub.id);
+                        return (
+                          <td key={sub.id} style={{ padding: '8px' }}>
+                            <select 
+                              value={assignment ? assignment.teacher_id : ''}
+                              onChange={async (e) => {
+                                const teacherUserId = parseInt(e.target.value);
+                                try {
+                                  await api.post(`/classes/${c.class_id}/subjects`, { subject_id: sub.id, teacher_id: teacherUserId });
+                                  const res = await api.get('/classes/all-assignments');
+                                  setClassAssignments(res);
+                                } catch (err) { alert('Failed to assign teacher'); }
+                              }}
+                              style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '12px' }}
+                            >
+                              <option value="">-- Unassigned --</option>
+                              {staffUsers.map(t => (
+                                <option key={t.user_id || t.id} value={t.user_id || t.id}>{t.first_name} {t.last_name}</option>
+                              ))}
+                            </select>
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding: '8px' }}>
+                        <button onClick={() => {
+                           const d = prompt("Enter Week Start Monday (YYYY-MM-DD):", new Date().toISOString().split('T')[0]);
+                          if (d) window.open(`${API_BASE}/attendance/export/weekly?class_id=${c.class_id}&week_start=${d}`, '_blank');
+                        }} style={{ padding: '6px 10px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}>Export</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ) : (

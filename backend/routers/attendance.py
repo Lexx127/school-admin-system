@@ -5,7 +5,7 @@ from sqlalchemy import func
 from models import (
     User, Staff, Student, StudentAttendance,
     StaffClockIn, Class, ClassSubject,
-    AttendanceStatus, UserRole, Parent, ParentStudent
+    AttendanceStatus, UserRole, Parent, ParentStudent, SchoolTerm, SchoolCalendarDay, DayType
 )
 from auth import get_current_user, require_role
 from datetime import date, datetime, timedelta
@@ -13,6 +13,29 @@ from pydantic import BaseModel
 from typing import Optional
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
+
+
+def _current_term(db: Session):
+    today = date.today()
+    return db.query(SchoolTerm).filter(
+        SchoolTerm.start_date <= today,
+        SchoolTerm.end_date >= today
+    ).first()
+
+
+def _attendance_summary_for_records(records, school_day_count: int):
+    days_attended = sum(1 for r in records if r.status in [AttendanceStatus.PRESENT, AttendanceStatus.LATE])
+    days_absent = sum(1 for r in records if r.status == AttendanceStatus.ABSENT)  # type: ignore
+    days_late = sum(1 for r in records if r.status == AttendanceStatus.LATE)  # type: ignore
+    denominator = school_day_count if school_day_count > 0 else len(records)
+    attendance_percentage = round((days_attended / denominator * 100), 1) if denominator > 0 else 0
+    return {
+        "total_days": denominator,
+        "days_attended": days_attended,
+        "days_absent": days_absent,
+        "days_late": days_late,
+        "attendance_percentage": attendance_percentage
+    }
 
 
 # --- Pydantic Schemas ---
@@ -39,22 +62,18 @@ def take_attendance(
     if not staff:
         raise HTTPException(status_code=404, detail="Staff profile not found")
 
-    # Verify teacher teaches this class
-    class_subject = db.query(ClassSubject).filter(
-        ClassSubject.class_id == request.class_id,
-        ClassSubject.teacher_id == staff.id
-    ).first()
+    # Verify teacher is the homeroom teacher for this class
+    if current_user.role == UserRole.TEACHER:
+        homeroom_check = db.query(Class).filter(
+            Class.id == request.class_id,
+            Class.homeroom_teacher_id == staff.id
+        ).first()
 
-    homeroom_check = db.query(Class).filter(
-        Class.id == request.class_id,
-        Class.homeroom_teacher_id == staff.id
-    ).first()
-
-    if not class_subject and not homeroom_check:
-        raise HTTPException(
-            status_code=403,
-            detail="You are not assigned to this class"
-        )
+        if not homeroom_check:
+            raise HTTPException(
+                status_code=403,
+                detail="You are not the homeroom teacher for this class"
+            )
 
     # Check attendance not already taken for this date
     existing = db.query(StudentAttendance).filter(
@@ -120,26 +139,28 @@ def get_my_attendance(
     if not student:
         raise HTTPException(status_code=404, detail="Student profile not found")
 
-    records = db.query(StudentAttendance).filter(
-        StudentAttendance.student_id == student.id
-    ).order_by(StudentAttendance.date.desc()).all()
-
-    total_days = len(records)
-    days_attended = sum(1 for r in records if r.status in [AttendanceStatus.PRESENT, AttendanceStatus.LATE])
-    days_absent = sum(1 for r in records if r.status == AttendanceStatus.ABSENT) # type: ignore
-    days_late = sum(1 for r in records if r.status == AttendanceStatus.LATE) # type: ignore
-    attendance_percentage = round((days_attended / total_days * 100), 1) if total_days > 0 else 0
+    term = _current_term(db)
+    if term:
+        records = db.query(StudentAttendance).filter(
+            StudentAttendance.student_id == student.id,
+            StudentAttendance.date >= term.start_date,
+            StudentAttendance.date <= min(term.end_date, date.today())
+        ).order_by(StudentAttendance.date.desc()).all()
+        school_day_count = db.query(SchoolCalendarDay).filter(
+            SchoolCalendarDay.date >= term.start_date,
+            SchoolCalendarDay.date <= min(term.end_date, date.today()),
+            SchoolCalendarDay.day_type == DayType.SCHOOL_DAY
+        ).count()
+    else:
+        records = db.query(StudentAttendance).filter(
+            StudentAttendance.student_id == student.id
+        ).order_by(StudentAttendance.date.desc()).all()
+        school_day_count = 0
 
     return {
         "student_name": f"{current_user.first_name} {current_user.last_name}",
         "student_number": student.student_number,
-        "summary": {
-            "total_days": total_days,
-            "days_attended": days_attended,
-            "days_absent": days_absent,
-            "days_late": days_late,
-            "attendance_percentage": attendance_percentage
-        },
+        "summary": _attendance_summary_for_records(records, school_day_count),
         "records": [
             {
                 "date": r.date,
@@ -175,26 +196,28 @@ def get_child_attendance(
         )
 
     student = db.query(Student).filter(Student.id == student_id).first()
-    records = db.query(StudentAttendance).filter(
-        StudentAttendance.student_id == student_id
-    ).order_by(StudentAttendance.date.desc()).all()
-
-    total_days = len(records)
-    days_attended = sum(1 for r in records if r.status in [AttendanceStatus.PRESENT, AttendanceStatus.LATE])
-    days_absent = sum(1 for r in records if r.status == AttendanceStatus.ABSENT) # type: ignore
-    days_late = sum(1 for r in records if r.status == AttendanceStatus.LATE) # type: ignore
-    attendance_percentage = round((days_attended / total_days * 100), 1) if total_days > 0 else 0
+    term = _current_term(db)
+    if term:
+        records = db.query(StudentAttendance).filter(
+            StudentAttendance.student_id == student_id,
+            StudentAttendance.date >= term.start_date,
+            StudentAttendance.date <= min(term.end_date, date.today())
+        ).order_by(StudentAttendance.date.desc()).all()
+        school_day_count = db.query(SchoolCalendarDay).filter(
+            SchoolCalendarDay.date >= term.start_date,
+            SchoolCalendarDay.date <= min(term.end_date, date.today()),
+            SchoolCalendarDay.day_type == DayType.SCHOOL_DAY
+        ).count()
+    else:
+        records = db.query(StudentAttendance).filter(
+            StudentAttendance.student_id == student_id
+        ).order_by(StudentAttendance.date.desc()).all()
+        school_day_count = 0
 
     return {
         "student_name": f"{student.user.first_name} {student.user.last_name}", # type: ignore
         "student_number": student.student_number, # type: ignore
-        "summary": {
-            "total_days": total_days,
-            "days_attended": days_attended,
-            "days_absent": days_absent,
-            "days_late": days_late,
-            "attendance_percentage": attendance_percentage
-        },
+        "summary": _attendance_summary_for_records(records, school_day_count),
         "records": [
             {
                 "date": r.date,

@@ -4,9 +4,16 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 export default function TeacherDashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
+
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+
   const [dashboard, setDashboard] = useState(null)
   const [assignments, setAssignments] = useState([])
   const [notices, setNotices] = useState([])
@@ -22,6 +29,8 @@ export default function TeacherDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [clockInStatus, setClockInStatus] = useState('')
+  const [timetable, setTimetable] = useState([])
+  const [schoolSettings, setSchoolSettings] = useState({})
   
   // Teaching Modules State
   const [selectedClassId, setSelectedClassId] = useState('')
@@ -40,11 +49,26 @@ export default function TeacherDashboard() {
 
   const [noticeForm, setNoticeForm] = useState({ title: '', body: '', audience: 'ALL', target_class_id: '' })
   const [eventForm, setEventForm] = useState({ title: '', description: '', event_type: 'ACADEMIC', location: '', start_datetime: '', end_datetime: '', audience: 'ALL', target_class_id: '' })
+  const homeroomClass = dashboard?.homeroom_class
+    ? (
+      typeof dashboard.homeroom_class === 'object'
+        ? dashboard.homeroom_class
+        : dashboard?.classes?.find(c => c.class_name === dashboard.homeroom_class)
+    )
+    : null
+
+  useEffect(() => {
+    if (activeTab !== 'Attendance') return
+    const homeroomClassId = homeroomClass?.class_id
+    if (homeroomClassId && !selectedClassId) {
+      setSelectedClassId(String(homeroomClassId))
+    }
+  }, [activeTab, homeroomClass, selectedClassId])
 
   useEffect(() => {
     async function loadData() {
   try {
-    const [userData, dashData, assignData, noticeData, eventData, inboxData, parentsData, staffData, studentsData] = await Promise.allSettled([
+    const [userData, dashData, assignData, noticeData, eventData, inboxData, parentsData, staffData, studentsData, timetableData, settingsData] = await Promise.allSettled([
       api.get('/auth/me'),
       api.get('/users/teacher/dashboard'),
       api.get('/homework/teacher/mine'),
@@ -54,6 +78,8 @@ export default function TeacherDashboard() {
       api.get('/users/parents/with-students'),
       api.get('/users/staff/all'),
       api.get('/users/students/all'),
+      api.get('/timetable/teacher/me'),
+      api.get('/settings/'),
     ])
 
     // If auth fails, redirect to login immediately
@@ -72,6 +98,8 @@ export default function TeacherDashboard() {
     if (parentsData?.status === 'fulfilled') setParentsList(parentsData.value)
     if (staffData?.status === 'fulfilled') setStaffList(staffData.value)
     if (studentsData?.status === 'fulfilled') setStudentsList(studentsData.value)
+    if (timetableData?.status === 'fulfilled') setTimetable(timetableData.value)
+    if (settingsData?.status === 'fulfilled') setSchoolSettings(settingsData.value)
 
     // Log any failures so you can see them in the browser console
     const failures = [userData, dashData, assignData, noticeData, eventData, inboxData, parentsData, staffData, studentsData]
@@ -172,6 +200,48 @@ export default function TeacherDashboard() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--off-white)' }}>
 
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontFamily: 'var(--font-playfair)', fontSize: '20px', marginBottom: '16px', color: 'var(--text-dark)', textAlign: 'left' }}>Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (passwordForm.new_password !== passwordForm.confirm_password) {
+                return alert("New passwords do not match!")
+              }
+              try {
+                const res = await api.put('/auth/change-password', {
+                  current_password: passwordForm.current_password,
+                  new_password: passwordForm.new_password
+                })
+                alert("Password changed successfully!")
+                setShowPasswordModal(false)
+                setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+              } catch (err) { alert(err.message) }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Current Password</label>
+                <input type="password" required value={passwordForm.current_password} onChange={e => setPasswordForm({...passwordForm, current_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.new_password} onChange={e => setPasswordForm({...passwordForm, new_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Confirm New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.confirm_password} onChange={e => setPasswordForm({...passwordForm, confirm_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowPasswordModal(false)} style={{ padding: '10px 16px', border: '1px solid #d1d5db', background: 'white', color: 'var(--text-dark)', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Cancel</button>
+                <button type="submit" style={{ padding: '10px 16px', border: 'none', background: 'var(--blue-deep)', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Update Password</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
       {/* SIDEBAR */}
       <div style={{
         width: '260px', background: 'var(--blue-deep)',
@@ -218,9 +288,10 @@ export default function TeacherDashboard() {
           {[
             { label: 'Overview', items: [
               { name: 'Dashboard', icon: '⊞', active: true },
+              { name: 'My Timetable', icon: '⏳' },
             ]},
             { label: 'Teaching', items: [
-              { name: 'Attendance', icon: '✓' },
+              ...(homeroomClass ? [{ name: 'Attendance', icon: '✓' }] : []),
               { name: 'Homework', icon: '📖', badge: upcomingAssignments.length || null },
               { name: 'Grades', icon: '📊', badge: awaitingGrades.length || null },
             ]},
@@ -270,8 +341,23 @@ export default function TeacherDashboard() {
         <div style={{
           padding: '16px 24px',
           borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', gap: '12px',
+          display: 'flex', alignItems: 'center', gap: '12px', position: 'relative',
         }}>
+          {showProfileDropdown && (
+            <div style={{
+               position: 'absolute', bottom: '100%', left: '16px', right: '16px',
+               background: 'white', borderRadius: '8px', padding: '8px', marginBottom: '8px',
+               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 20
+            }}>
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setShowProfileDropdown(false); }} 
+                  style={{ width: '100%', padding: '10px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', fontWeight: '600', color: 'var(--text-dark)', cursor: 'pointer', borderRadius: '6px' }}
+                  onMouseOver={(e) => e.target.style.background = '#f5f6fa'}
+                  onMouseOut={(e) => e.target.style.background = 'none'}
+               >Change Password</button>
+            </div>
+          )}
+          <div onClick={() => setShowProfileDropdown(!showProfileDropdown)} style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }}>
           <div style={{
             width: '36px', height: '36px',
             background: 'rgba(37,99,235,0.3)',
@@ -290,6 +376,7 @@ export default function TeacherDashboard() {
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {user?.email}
             </div>
+          </div>
           </div>
           <button onClick={handleLogout} style={{
             background: 'none', border: 'none',
@@ -612,6 +699,42 @@ export default function TeacherDashboard() {
               </div>
             </div>
           </>
+        ) : activeTab === 'My Timetable' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>My Timetable</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', background: '#fafbfc', border: '1px solid #eef0f8' }}>Period</th>
+                    {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, i) => (
+                      <th key={i} style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', background: '#fafbfc', border: '1px solid #eef0f8' }}>Day {i + 1}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: parseInt(schoolSettings.periods_per_day || 8) }).map((_, p) => (
+                    <tr key={p}>
+                      <td style={{ padding: '12px', fontWeight: '700', fontSize: '13px', background: '#fafbfc', border: '1px solid #eef0f8', textAlign: 'center' }}>{p + 1}</td>
+                      {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, d) => {
+                        const slot = timetable.find(s => s.cycle_day === d + 1 && s.period_number === p + 1)
+                        return (
+                          <td key={d} style={{ padding: '10px', border: '1px solid #eef0f8', minWidth: '120px', height: '80px', verticalAlign: 'top' }}>
+                            {slot ? (
+                              <div style={{ padding: '8px', background: 'var(--blue-light)', borderRadius: '8px', height: '100%' }}>
+                                <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--blue-deep)' }}>{slot.subject_name}</div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-dark)', marginTop: '4px' }}>{slot.class_name}</div>
+                              </div>
+                            ) : null}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : activeTab === 'Attendance' ? (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -633,31 +756,47 @@ export default function TeacherDashboard() {
                       setSelectedClassId(cid)
                       if (cid) {
                         try {
+                          setError('')
                           const res = await api.get(`/attendance/students/class/${cid}`)
                           setAttendanceHistory(res)
-                          // Also need students in class to mark attendance
-                          // Using a generic students list for now or getting from dashboard
-                          const cls = dashboard.classes.find(c => c.class_id == cid)
-                          if (cls) {
-                            // Fetching class details to get student list
-                            const details = await api.get(`/users/classes/${cid}/info`)
-                            setClassStudents(details.students || [])
-                            const initial = {}
-                            details.students.forEach(s => initial[s.student_id] = 'PRESENT')
-                            setAttendanceRecords(initial)
-                          }
-                        } catch (err) { console.error(err) }
+                          const details = await api.get(`/users/classes/${cid}/info`)
+                          const students = details.students || []
+                          setClassStudents(students)
+                          const initial = {}
+                          students.forEach(s => initial[s.student_id] = 'PRESENT')
+                          setAttendanceRecords(initial)
+                        } catch (err) {
+                          setClassStudents([])
+                          setAttendanceRecords({})
+                          const message = err?.message || 'Failed to load class data.'
+                          setError(message)
+                        }
                       }
                     }}
                     style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db' }}
                   >
                     <option value="">-- Choose Class --</option>
-                    {dashboard?.classes?.map(c => <option key={c.class_id} value={c.class_id}>{c.class_name} ({c.subject_name})</option>)}
+                    {homeroomClass ? (
+                      <option value={homeroomClass.class_id}>
+                        {homeroomClass.class_name} (Homeroom)
+                      </option>
+                    ) : null}
                   </select>
                 </div>
                 <div style={{ width: '200px' }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>Date</label>
                   <input type="date" value={attendanceDate} onChange={e => setAttendanceDate(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db' }} />
+                </div>
+                <div style={{ alignSelf: 'flex-end' }}>
+                  <button 
+                    onClick={() => {
+                      if (!selectedClassId) return alert("Please select a class first");
+                      window.open(`${API_BASE}/attendance/export/weekly?class_id=${selectedClassId}&week_start=${attendanceDate}`, '_blank');
+                    }}
+                    style={{ padding: '10px 16px', background: 'white', color: 'var(--blue-deep)', border: '1px solid var(--blue-deep)', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
+                  >
+                    Export Weekly (Excel)
+                  </button>
                 </div>
               </div>
 
@@ -761,14 +900,18 @@ export default function TeacherDashboard() {
                 <form onSubmit={async (e) => {
                   e.preventDefault()
                   try {
+                    const payload = { ...editingHw }
+                    payload.class_subject_id = parseInt(payload.class_subject_id)
+                    payload.max_marks = parseInt(payload.max_marks)
                     if (editingHw.id) {
-                      await api.put(`/homework/update/${editingHw.id}`, editingHw)
+                      await api.put(`/homework/update/${editingHw.id}`, payload)
                     } else {
-                      await api.post('/homework/create', editingHw)
+                      await api.post('/homework/create', payload)
                     }
                     const res = await api.get('/homework/teacher/mine')
                     setAssignments(res)
                     setEditingHw(null)
+                    alert('Assignment saved successfully!')
                   } catch (err) { alert(err.message) }
                 }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div>
@@ -860,17 +1003,23 @@ export default function TeacherDashboard() {
                     setSelectedAssignmentId(aid)
                     if (aid) {
                       try {
-                        // Find class id for this assignment
                         const assign = assignments.find(a => a.assignment_id == aid)
-                        // Use the class_id directly from the assignment object
-                        if (assign && assign.class_id) {
-                          const details = await api.get(`/users/classes/${assign.class_id}/info`)
-                          setGradingStudents(details.students || [])
-                          const initial = {}
-                          details.students.forEach(s => initial[s.student_id] = { marks: '', feedback: '' })
-                          setGradeEntries(initial)
+                        if (!assign?.class_id) {
+                          setGradingStudents([])
+                          setGradeEntries({})
+                          return
                         }
-                      } catch (err) { alert(`Failed to load class students: ${err.message}`) }
+                        const details = await api.get(`/users/classes/${assign.class_id}/info`)
+                        const students = details.students || []
+                        setGradingStudents(students)
+                        const initial = {}
+                        students.forEach(s => initial[s.student_id] = { marks: '', feedback: '' })
+                        setGradeEntries(initial)
+                      } catch (err) {
+                        setGradingStudents([])
+                        setGradeEntries({})
+                        alert(`Failed to load class students: ${err.message}`)
+                      }
                     }
                   }}
                   style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db' }}

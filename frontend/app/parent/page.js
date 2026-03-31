@@ -7,6 +7,11 @@ import { api } from '@/lib/api'
 export default function ParentDashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
+
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+
   const [dashboard, setDashboard] = useState(null)
   const [selectedChild, setSelectedChild] = useState(null)
   const [homework, setHomework] = useState({ upcoming: [], past: [] })
@@ -119,6 +124,48 @@ export default function ParentDashboard() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--off-white)' }}>
 
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontFamily: 'var(--font-playfair)', fontSize: '20px', marginBottom: '16px', color: 'var(--text-dark)', textAlign: 'left' }}>Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (passwordForm.new_password !== passwordForm.confirm_password) {
+                return alert("New passwords do not match!")
+              }
+              try {
+                const res = await api.put('/auth/change-password', {
+                  current_password: passwordForm.current_password,
+                  new_password: passwordForm.new_password
+                })
+                alert("Password changed successfully!")
+                setShowPasswordModal(false)
+                setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+              } catch (err) { alert(err.message) }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Current Password</label>
+                <input type="password" required value={passwordForm.current_password} onChange={e => setPasswordForm({...passwordForm, current_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.new_password} onChange={e => setPasswordForm({...passwordForm, new_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Confirm New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.confirm_password} onChange={e => setPasswordForm({...passwordForm, confirm_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowPasswordModal(false)} style={{ padding: '10px 16px', border: '1px solid #d1d5db', background: 'white', color: 'var(--text-dark)', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Cancel</button>
+                <button type="submit" style={{ padding: '10px 16px', border: 'none', background: 'var(--blue-deep)', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Update Password</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
       {/* SIDEBAR */}
       <div style={{
         width: '260px', background: 'var(--blue-deep)',
@@ -221,8 +268,23 @@ export default function ParentDashboard() {
 
         <div style={{
           padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', gap: '12px',
+          display: 'flex', alignItems: 'center', gap: '12px', position: 'relative',
         }}>
+          {showProfileDropdown && (
+            <div style={{
+               position: 'absolute', bottom: '100%', left: '16px', right: '16px',
+               background: 'white', borderRadius: '8px', padding: '8px', marginBottom: '8px',
+               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 20
+            }}>
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setShowProfileDropdown(false); }} 
+                  style={{ width: '100%', padding: '10px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', fontWeight: '600', color: 'var(--text-dark)', cursor: 'pointer', borderRadius: '6px' }}
+                  onMouseOver={(e) => e.target.style.background = '#f5f6fa'}
+                  onMouseOut={(e) => e.target.style.background = 'none'}
+               >Change Password</button>
+            </div>
+          )}
+          <div onClick={() => setShowProfileDropdown(!showProfileDropdown)} style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }}>
           <div style={{
             width: '36px', height: '36px', background: 'rgba(37,99,235,0.3)',
             border: '2px solid rgba(37,99,235,0.5)', borderRadius: '50%',
@@ -236,6 +298,7 @@ export default function ParentDashboard() {
               {user ? `${user.first_name} ${user.last_name}` : ''}
             </div>
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Parent</div>
+          </div>
           </div>
           <button onClick={handleLogout} style={{
             background: 'none', border: 'none',

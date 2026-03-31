@@ -81,11 +81,20 @@ def get_teacher_dashboard(
             "student_count": len(cs.homeroom_class.students)
         })
 
+    homeroom = db.query(Class).filter(Class.homeroom_teacher_id == staff.id).first()
     return {
         "staff_id": staff.id,
         "name": f"{current_user.first_name} {current_user.last_name}",
         "job_title": staff.job_title,
         "department": staff.department,
+        "homeroom_class": (
+            {
+                "class_id": homeroom.id,
+                "class_name": homeroom.name,
+                "grade_level": homeroom.grade_level,
+            }
+            if homeroom else None
+        ),
         "classes": classes
     }
 
@@ -472,7 +481,7 @@ def get_all_classes(
     db: Session = Depends(get_db)
 ):
     classes = db.query(Class).all()
-    return [{"class_id": c.id, "class_name": c.name} for c in classes]
+    return [{"class_id": c.id, "class_name": c.name, "homeroom_teacher_id": c.homeroom_teacher.user_id if c.homeroom_teacher else None} for c in classes]
 
 
 @router.get("/staff/all")

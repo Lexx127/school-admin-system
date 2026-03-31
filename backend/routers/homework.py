@@ -3,13 +3,28 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import (
     User, Staff, Student, Parent, ParentStudent,
-    Assignment, ClassSubject, UserRole
+    Assignment, ClassSubject, UserRole, StudentSubjectEnrolment
 )
 from auth import get_current_user, require_role
 from datetime import date, datetime
 from pydantic import BaseModel
 from typing import Optional
 from models import Grade
+
+
+def get_active_enrolment_map(student_id: int, db: Session):
+    enrolments = db.query(StudentSubjectEnrolment).filter(
+        StudentSubjectEnrolment.student_id == student_id
+    ).all()
+    return {e.class_subject_id: e for e in enrolments}
+
+
+def is_enrolled_for_assignment(enrolment: StudentSubjectEnrolment, assignment_due_date: date):
+    if enrolment.enrolled_date > assignment_due_date:
+        return False
+    if enrolment.end_date and enrolment.end_date < assignment_due_date:
+        return False
+    return True
 
 router = APIRouter(prefix="/homework", tags=["homework"])
 
@@ -157,11 +172,20 @@ def get_my_assignments(
 
     result = []
     for a in assignments:
-            # Calculate valid students: only count students who were enrolled before or exactly on the due date
-            valid_students = [
-                s for s in a.class_subject.homeroom_class.students
-                if s.user.created_at.date() <= a.due_date
-            ]
+            # Prefer enrolment records when available; fallback keeps legacy behavior.
+            valid_students = []
+            for s in a.class_subject.homeroom_class.students:
+                enrolment = db.query(StudentSubjectEnrolment).filter(
+                    StudentSubjectEnrolment.student_id == s.id,
+                    StudentSubjectEnrolment.class_subject_id == a.class_subject_id,
+                    StudentSubjectEnrolment.enrolled_date <= a.due_date
+                ).order_by(StudentSubjectEnrolment.enrolled_date.desc()).first()
+
+                if enrolment:
+                    if enrolment.end_date is None or enrolment.end_date >= a.due_date:
+                        valid_students.append(s)
+                elif s.user.created_at.date() <= a.due_date:
+                    valid_students.append(s)
 
             result.append({
                 "assignment_id": a.id,
@@ -191,12 +215,14 @@ def get_student_assignments(
     if not student:
         raise HTTPException(status_code=404, detail="Student profile not found")
 
-    # Get all class subjects for this student's class
-    class_subjects = db.query(ClassSubject).filter(
-        ClassSubject.class_id == student.class_id
-    ).all()
-
-    class_subject_ids = [cs.id for cs in class_subjects]
+    # Assignments should only appear for subjects the student is actively enrolled in.
+    enrolment_map = get_active_enrolment_map(student.id, db)
+    class_subject_ids = [e.class_subject_id for e in enrolment_map.values()]
+    if not class_subject_ids:
+        class_subjects = db.query(ClassSubject).filter(
+            ClassSubject.class_id == student.class_id
+        ).all()
+        class_subject_ids = [cs.id for cs in class_subjects]
 
     # Get all published assignments for those class subjects
     assignments = db.query(Assignment).filter(
@@ -208,6 +234,10 @@ def get_student_assignments(
     past = []
 
     for a in assignments:
+        if enrolment_map:
+            enrolment = enrolment_map.get(a.class_subject_id)
+            if not enrolment or not is_enrolled_for_assignment(enrolment, a.due_date):
+                continue
         entry = {
             "assignment_id": a.id,
             "title": a.title,
@@ -264,11 +294,13 @@ def get_child_assignments(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    class_subjects = db.query(ClassSubject).filter(
-        ClassSubject.class_id == student.class_id
-    ).all()
-
-    class_subject_ids = [cs.id for cs in class_subjects]
+    enrolment_map = get_active_enrolment_map(student.id, db)
+    class_subject_ids = [e.class_subject_id for e in enrolment_map.values()]
+    if not class_subject_ids:
+        class_subjects = db.query(ClassSubject).filter(
+            ClassSubject.class_id == student.class_id
+        ).all()
+        class_subject_ids = [cs.id for cs in class_subjects]
 
     assignments = db.query(Assignment).filter(
         Assignment.class_subject_id.in_(class_subject_ids),
@@ -279,6 +311,10 @@ def get_child_assignments(
     past = []
 
     for a in assignments:
+        if enrolment_map:
+            enrolment = enrolment_map.get(a.class_subject_id)
+            if not enrolment or not is_enrolled_for_assignment(enrolment, a.due_date):
+                continue
         entry = {
             "assignment_id": a.id,
             "title": a.title,

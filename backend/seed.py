@@ -4,7 +4,10 @@ from models import (
     Class, Subject, ClassSubject, StaffClockIn,
     StudentAttendance, Assignment, Grade,
     Notice, NoticeComment, Event, SchoolSettings,
-    UserRole, AttendanceStatus, NoticeAudience, EventType
+    UserRole, AttendanceStatus, NoticeAudience, EventType,
+    Fee, FeePayment, Message,
+    SchoolTerm, SchoolCalendarDay, DayType,
+    StudentSubjectEnrolment
 )
 from auth import hash_password
 from datetime import datetime, date, timedelta
@@ -14,8 +17,10 @@ db = SessionLocal()
 
 def clear_data():
     print("Clearing existing data...")
+    db.query(Message).delete()
     db.query(NoticeComment).delete()
     db.query(Grade).delete()
+    db.query(StudentSubjectEnrolment).delete()
     db.query(StudentAttendance).delete()
     db.query(StaffClockIn).delete()
     db.query(Assignment).delete()
@@ -23,15 +28,53 @@ def clear_data():
     db.query(Event).delete()
     db.query(ParentStudent).delete()
     db.query(ClassSubject).delete()
+    db.query(FeePayment).delete()
+    db.query(Fee).delete()
     db.query(Student).delete()
     db.query(Parent).delete()
     db.query(Class).delete()
     db.query(Staff).delete()
     db.query(Subject).delete()
     db.query(SchoolSettings).delete()
+    db.query(SchoolCalendarDay).delete()
+    db.query(SchoolTerm).delete()
     db.query(User).delete()
     db.commit()
     print("Done.")
+
+def create_terms():
+    print("Creating school terms...")
+    from datetime import date, timedelta
+    terms_data = [
+        {"name": "Term 1", "academic_year": "2026", "start": date(2026, 1, 13), "end": date(2026, 4, 3)},
+        {"name": "Term 2", "academic_year": "2026", "start": date(2026, 5, 5), "end": date(2026, 8, 7)},
+        {"name": "Term 3", "academic_year": "2026", "start": date(2026, 9, 8), "end": date(2026, 12, 4)},
+    ]
+    cycle_length = 6
+    for td in terms_data:
+        term = SchoolTerm(
+            name=td["name"],
+            academic_year=td["academic_year"],
+            start_date=td["start"],
+            end_date=td["end"]
+        )
+        db.add(term)
+        db.flush()
+        cur = td["start"]
+        cycle = 1
+        while cur <= td["end"]:
+            is_weekend = cur.weekday() >= 5
+            dtype = DayType.SCHOOL_HOLIDAY if is_weekend else DayType.SCHOOL_DAY
+            cd = cur.day
+            if is_weekend:
+                cd = None
+            else:
+                cd = cycle
+                cycle = (cycle % cycle_length) + 1
+            db.add(SchoolCalendarDay(date=cur, day_type=dtype, cycle_day=cd, term_id=term.id))
+            cur += timedelta(days=1)
+    db.commit()
+    print("Created 3 school terms with calendar days.")
 
 def create_school_settings():
     print("Creating school settings...")
@@ -98,7 +141,6 @@ def create_subjects():
 def create_users_and_staff(subjects):
     print("Creating users and staff...")
 
-    # Super Admin
     super_admin_user = User(
         email="admin@standrews.ac.zw",
         password_hash=hash_password("admin123"),
@@ -106,7 +148,8 @@ def create_users_and_staff(subjects):
         first_name="System",
         last_name="Administrator",
         phone="+263771000000",
-        is_active=True
+        is_active=True,
+        created_at=datetime.utcnow() - timedelta(days=30)
     )
     db.add(super_admin_user)
     db.commit()
@@ -119,7 +162,8 @@ def create_users_and_staff(subjects):
         first_name="James",
         last_name="Mutasa",
         phone="+263771000001",
-        is_active=True
+        is_active=True,
+        created_at=datetime.utcnow() - timedelta(days=30)
     )
     db.add(principal_user)
     db.commit()
@@ -191,7 +235,8 @@ def create_users_and_staff(subjects):
             first_name=t["first_name"],
             last_name=t["last_name"],
             phone=t["phone"],
-            is_active=True
+            is_active=True,
+            created_at=datetime.utcnow() - timedelta(days=30)
         )
         db.add(user)
         db.commit()
@@ -308,7 +353,8 @@ def create_classes_and_students(teachers):
             role=UserRole.STUDENT,
             first_name=s["first_name"],
             last_name=s["last_name"],
-            is_active=True
+            is_active=True,
+            created_at=datetime.utcnow() - timedelta(days=30)
         )
         db.add(user)
         db.commit()
@@ -378,7 +424,8 @@ def create_parents(students):
             first_name=p["first_name"],
             last_name=p["last_name"],
             phone=p["phone"],
-            is_active=True
+            is_active=True,
+            created_at=datetime.utcnow() - timedelta(days=30)
         )
         db.add(user)
         db.commit()
@@ -595,7 +642,7 @@ def create_attendance(students, teachers):
 
     today = date.today()
 
-    for day_offset in range(5):
+    for day_offset in range(1, 6):
         current_date = today - timedelta(days=day_offset)
 
         if current_date.weekday() >= 5:
@@ -750,11 +797,31 @@ def create_notices_and_events(principal_user, teachers):
     print(f"Created {len(notices)} notices and {len(events)} events.")
 
 
+def create_enrolments(students, class_subjects):
+    print("Creating student subject enrolments...")
+    from datetime import date
+    count = 0
+    for s_dict in students:
+        student = s_dict["student"]
+        # Enrol student into class_subjects that match their class
+        matching = [cs for cs in class_subjects if cs.class_id == student.class_id]
+        for cs in matching:
+            db.add(StudentSubjectEnrolment(
+                student_id=student.id,
+                class_subject_id=cs.id,
+                academic_year="2026",
+                enrolled_date=date(2026, 1, 13)
+            ))
+            count += 1
+    db.commit()
+    print(f"Created {count} subject enrolments.")
+
 # --- Main run function ---
 def seed():
     try:
         clear_data()
         settings = create_school_settings()
+        create_terms()
         subjects = create_subjects()
         super_admin_user, principal_user, principal_staff, teachers = create_users_and_staff(subjects)
         class_10a, class_10b, students = create_classes_and_students(teachers)
@@ -764,6 +831,7 @@ def seed():
         assignments = create_assignments_and_grades(class_subjects, students)
         create_attendance(students, teachers)
         create_notices_and_events(principal_user, teachers)
+        create_enrolments(students, class_subjects)
 
         print("\n[SUCCESS] Database seeded successfully!")
         print("\n--- Login Credentials ---")

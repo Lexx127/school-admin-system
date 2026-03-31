@@ -4,6 +4,8 @@ import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
 const TABS = {
   OVERVIEW: 'overview',
   STUDENTS: 'students',
@@ -11,11 +13,20 @@ const TABS = {
   PARENTS: 'parents',
   FEES: 'fees',
   COMMUNICATIONS: 'communications',
+  CLASSES: 'classes',
+  CALENDAR: 'calendar',
+  ENROLMENT: 'enrolment',
+  TIMETABLE: 'timetable',
 }
 
 export default function AdminDashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
+
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+
   const [allUsers, setAllUsers] = useState([])
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
@@ -33,9 +44,21 @@ export default function AdminDashboard() {
   const [newFeeForm, setNewFeeForm] = useState({ student_id: '', academic_year: '2026', term: 'Term 1', amount_due: '', due_date: '' })
   const [paymentForm, setPaymentForm] = useState({ fee_id: null, amount_paid: '', payment_method: 'Cash' })
   const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', email: '', password: '', student_number: '', class_id: '', grade_level: '' })
-  const [staffForm, setStaffForm] = useState({ first_name: '', last_name: '', email: '', password: '', job_title: '', role: 'TEACHER' })
+  const [staffForm, setStaffForm] = useState({ first_name: '', last_name: '', email: '', password: '', job_title: '', department: '', employee_number: '', role: 'TEACHER' })
   const [parentForm, setParentForm] = useState({ first_name: '', last_name: '', email: '', password: '', whatsapp_number: '' })
   const [linkForm, setLinkForm] = useState({ parent_id: '', student_id: '' })
+  const [allSubjects, setAllSubjects] = useState([])
+  const [classAssignments, setClassAssignments] = useState([])
+
+  const [terms, setTerms] = useState([])
+  const [selectedTermId, setSelectedTermId] = useState(null)
+  const [termDays, setTermDays] = useState([])
+  const [termForm, setTermForm] = useState({ name: '', academic_year: '2026', start_date: '', end_date: '', cycle_length: 6 })
+  
+  const [classEnrolments, setClassEnrolments] = useState([]) // For viewing class members
+  const [timetableSlots, setTimetableSlots] = useState([])
+  const [schoolSettings, setSchoolSettings] = useState({})
+  const [timetableForm, setTimetableForm] = useState({ class_subject_id: '', cycle_day: 1, period_number: 1 })
 
   const [formError, setFormError] = useState('')
   const [formSuccess, setFormSuccess] = useState('')
@@ -45,7 +68,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      const [userData, usersData, dashData, feesData, studentsData, parentsSubData, inboxData] = await Promise.allSettled([
+      const [userData, usersData, dashData, feesData, studentsData, parentsSubData, inboxData, subjectsData, assignmentsData, termsDataResult, slotsData, settingsData] = await Promise.allSettled([
         api.get('/auth/me'),
         api.get('/users/admin/all'),
         api.get('/users/classes/all'),
@@ -53,6 +76,11 @@ export default function AdminDashboard() {
         api.get('/users/students/all'),
         api.get('/users/parents/with-students'),
         api.get('/communications/inbox'),
+        api.get('/classes/all-subjects'),
+        api.get('/classes/all-assignments'),
+        api.get('/calendar/terms'),
+        api.get('/timetable/all'),
+        api.get('/settings/'),
       ])
 
       if (userData.status === 'rejected') { router.push('/'); return }
@@ -65,6 +93,12 @@ export default function AdminDashboard() {
       if (studentsData.status === 'fulfilled') setStudentRecords(studentsData.value)
       // parentsSubData is for reference if needed, but setParentsList doesn't exist here
       if (inboxData.status === 'fulfilled') setInbox(inboxData.value)
+      if (subjectsData?.status === 'fulfilled') setAllSubjects(subjectsData.value)
+      if (assignmentsData?.status === 'fulfilled') setClassAssignments(assignmentsData.value)
+      if (termsDataResult?.status === 'fulfilled') setTerms(termsDataResult.value)
+      if (slotsData?.status === 'fulfilled') setTimetableSlots(slotsData.value)
+      if (settingsData?.status === 'fulfilled') setSchoolSettings(settingsData.value)
+      if (settingsData?.status === 'fulfilled') setSchoolSettings(settingsData.value)
 
       setLoading(false)
     }
@@ -127,7 +161,7 @@ export default function AdminDashboard() {
     try {
       await api.post('/users/admin/create/staff', staffForm)
       setFormSuccess('Staff member created successfully')
-      setStaffForm({ first_name: '', last_name: '', email: '', password: '', job_title: '', role: 'TEACHER' })
+      setStaffForm({ first_name: '', last_name: '', email: '', password: '', job_title: '', department: '', employee_number: '', role: 'TEACHER' })
       const usersData = await api.get('/users/admin/all')
       setAllUsers(usersData)
     } catch (err) {
@@ -152,7 +186,7 @@ export default function AdminDashboard() {
     }
   }
 
- async function handleLinkParent() {
+  async function handleLinkParent() {
     setLinkError(''); setLinkSuccess(''); setSubmitting(true)
     try {
       await api.post('/users/admin/link/parent-student', {
@@ -166,6 +200,73 @@ export default function AdminDashboard() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleAddTimetableSlot = async () => {
+    setFormError(''); setFormSuccess(''); setSubmitting(true)
+    try {
+      await api.post('/timetable/add', {
+        class_subject_id: parseInt(timetableForm.class_subject_id),
+        cycle_day: parseInt(timetableForm.cycle_day),
+        period_number: parseInt(timetableForm.period_number)
+      })
+      const res = await api.get('/timetable/all')
+      setTimetableSlots(res)
+      setFormSuccess('Slot added successfully')
+    } catch (err) {
+      setFormError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleDeleteTimetableSlot = async (id) => {
+    if (!confirm("Remove this slot?")) return
+    try {
+      await api.delete(`/timetable/${id}`)
+      setTimetableSlots(prev => prev.filter(s => s.id !== id))
+    } catch (err) { alert(err.message) }
+  }
+
+  const handleUpdateSetting = async (key, value) => {
+    try {
+      await api.put(`/settings/${key}`, { value: value.toString() })
+      setSchoolSettings(prev => ({ ...prev, [key]: value }))
+      alert(`${key} updated!`)
+    } catch (err) { alert(err.message) }
+  }
+
+  const handleCreateTerm = async () => {
+    setSubmitting(true)
+    try {
+      await api.post('/calendar/terms', {
+        ...termForm,
+        cycle_length: parseInt(termForm.cycle_length)
+      })
+      const data = await api.get('/calendar/terms')
+      setTerms(data)
+      setTermForm({ name: '', academic_year: '2026', start_date: '', end_date: '', cycle_length: 6 })
+      alert("Term created successfully!")
+    } catch (err) { alert(err.message) }
+    finally { setSubmitting(false) }
+  }
+
+  const handleEnrolStudent = async () => {
+    setSubmitting(true)
+    try {
+      await api.post('/enrolments/', enrolmentForm)
+      alert("Student enrolled successfully!")
+      setEnrolmentForm({ student_id: '', class_subject_id: '' })
+    } catch (err) { alert(err.message) }
+    finally { setSubmitting(false) }
+  }
+
+  const fetchTermDays = async (termId) => {
+    try {
+      const data = await api.get(`/calendar/days/${termId}`)
+      setTermDays(data)
+      setSelectedTermId(termId)
+    } catch (err) { alert(err.message) }
   }
 
   if (loading) return (
@@ -212,6 +313,48 @@ export default function AdminDashboard() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--off-white)' }}>
 
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontFamily: 'var(--font-playfair)', fontSize: '20px', marginBottom: '16px', color: 'var(--text-dark)', textAlign: 'left' }}>Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (passwordForm.new_password !== passwordForm.confirm_password) {
+                return alert("New passwords do not match!")
+              }
+              try {
+                const res = await api.put('/auth/change-password', {
+                  current_password: passwordForm.current_password,
+                  new_password: passwordForm.new_password
+                })
+                alert("Password changed successfully!")
+                setShowPasswordModal(false)
+                setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+              } catch (err) { alert(err.message) }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Current Password</label>
+                <input type="password" required value={passwordForm.current_password} onChange={e => setPasswordForm({...passwordForm, current_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.new_password} onChange={e => setPasswordForm({...passwordForm, new_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Confirm New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.confirm_password} onChange={e => setPasswordForm({...passwordForm, confirm_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowPasswordModal(false)} style={{ padding: '10px 16px', border: '1px solid #d1d5db', background: 'white', color: 'var(--text-dark)', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Cancel</button>
+                <button type="submit" style={{ padding: '10px 16px', border: 'none', background: 'var(--blue-deep)', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Update Password</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
       {/* SIDEBAR */}
       <div style={{
         width: '260px', background: 'var(--blue-deep)',
@@ -254,6 +397,10 @@ export default function AdminDashboard() {
             { name: 'Parents', icon: '👨‍👩‍👧', key: TABS.PARENTS, count: parents.length },
             { name: 'Fees Management', icon: '💰', key: TABS.FEES },
             { name: 'Communications', icon: '💬', key: TABS.COMMUNICATIONS },
+            { name: 'Class Assignments', icon: '🏫', key: TABS.CLASSES },
+            { name: 'School Calendar', icon: '📅', key: TABS.CALENDAR },
+            { name: 'Subject Enrolment', icon: '📝', key: TABS.ENROLMENT },
+            { name: 'Timetable Management', icon: '⏳', key: TABS.TIMETABLE },
           ].map(item => (
             <div key={item.key}
               onClick={() => { setTab(item.key); setFormError(''); setFormSuccess('') }}
@@ -280,8 +427,23 @@ export default function AdminDashboard() {
 
         <div style={{
           padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', gap: '12px',
+          display: 'flex', alignItems: 'center', gap: '12px', position: 'relative',
         }}>
+          {showProfileDropdown && (
+            <div style={{
+               position: 'absolute', bottom: '100%', left: '16px', right: '16px',
+               background: 'white', borderRadius: '8px', padding: '8px', marginBottom: '8px',
+               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 20
+            }}>
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setShowProfileDropdown(false); }} 
+                  style={{ width: '100%', padding: '10px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', fontWeight: '600', color: 'var(--text-dark)', cursor: 'pointer', borderRadius: '6px' }}
+                  onMouseOver={(e) => e.target.style.background = '#f5f6fa'}
+                  onMouseOut={(e) => e.target.style.background = 'none'}
+               >Change Password</button>
+            </div>
+          )}
+          <div onClick={() => setShowProfileDropdown(!showProfileDropdown)} style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }}>
           <div style={{
             width: '36px', height: '36px', background: 'rgba(37,99,235,0.3)',
             border: '2px solid rgba(37,99,235,0.5)', borderRadius: '50%',
@@ -295,6 +457,7 @@ export default function AdminDashboard() {
               {user ? `${user.first_name} ${user.last_name}` : ''}
             </div>
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>Super Admin</div>
+          </div>
           </div>
           <button onClick={handleLogout} style={{
             background: 'none', border: 'none',
@@ -576,6 +739,8 @@ export default function AdminDashboard() {
                   { label: 'Last Name', key: 'last_name', type: 'text', placeholder: 'Banda' },
                   { label: 'Email', key: 'email', type: 'email', placeholder: 'j.banda@agape.ac.zw' },
                   { label: 'Password', key: 'password', type: 'password', placeholder: '••••••••' },
+                  { label: 'Employee Number', key: 'employee_number', type: 'text', placeholder: 'EMP006' },
+                  { label: 'Department', key: 'department', type: 'text', placeholder: 'Sciences' },
                   { label: 'Job Title', key: 'job_title', type: 'text', placeholder: 'Biology Teacher' },
                 ].map(field => (
                   <div key={field.key} style={formGroupStyle}>
@@ -1071,7 +1236,317 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {tab === TABS.CLASSES && (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Class-Subject Matrix</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
+                <thead>
+                  <tr style={{ background: '#fafbfc', borderBottom: '1px solid #eef0f8' }}>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--text-muted)' }}>Class</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--blue-deep)' }}>Homeroom</th>
+                    {allSubjects.map(sub => (
+                      <th key={sub.id} style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--text-muted)' }}>{sub.name}</th>
+                    ))}
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: '600', fontSize: '12px', color: 'var(--blue-deep)' }}>Export</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {classes.map(c => (
+                    <tr key={c.class_id} style={{ borderBottom: '1px solid #f5f6fa' }}>
+                      <td style={{ padding: '12px', fontWeight: '600', fontSize: '13px', color: 'var(--text-dark)' }}>{c.class_name}</td>
+                      <td style={{ padding: '8px', background: '#e0f2fe' }}>
+                        <select 
+                          value={c.homeroom_teacher_id || ''}
+                          onChange={async (e) => {
+                            const teacherUserId = parseInt(e.target.value);
+                            try {
+                              await api.put(`/classes/${c.class_id}/homeroom`, { teacher_id: teacherUserId });
+                              const res = await api.get('/users/classes/all');
+                              setClasses(res);
+                            } catch (err) { alert('Failed to assign homeroom teacher'); }
+                          }}
+                          style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #bae6fd', fontSize: '12px', background: 'white' }}
+                        >
+                          <option value="">-- Unassigned --</option>
+                          {staff.map(t => (
+                            <option key={t.user_id} value={t.user_id}>{t.first_name} {t.last_name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      {allSubjects.map(sub => {
+                        const assignment = classAssignments.find(a => a.class_id === c.class_id && a.subject_id === sub.id);
+                        return (
+                          <td key={sub.id} style={{ padding: '8px' }}>
+                            <select 
+                              value={assignment ? assignment.teacher_id : ''}
+                              onChange={async (e) => {
+                                const teacherUserId = parseInt(e.target.value);
+                                try {
+                                  await api.post(`/classes/${c.class_id}/subjects`, { subject_id: sub.id, teacher_id: teacherUserId });
+                                  const res = await api.get('/classes/all-assignments');
+                                  setClassAssignments(res);
+                                } catch (err) { alert('Failed to assign teacher'); }
+                              }}
+                              style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '12px' }}
+                            >
+                              <option value="">-- Unassigned --</option>
+                              {staff.map(t => (
+                                <option key={t.user_id} value={t.user_id}>{t.first_name} {t.last_name}</option>
+                              ))}
+                            </select>
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding: '8px' }}>
+                        <button onClick={() => {
+                           const d = prompt("Enter Week Start Monday (YYYY-MM-DD):", new Date().toISOString().split('T')[0]);
+                          if (d) window.open(`${API_BASE}/attendance/export/weekly?class_id=${c.class_id}&week_start=${d}`, '_blank');
+                        }} style={{ padding: '6px 10px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '4px', fontSize: '11px', cursor: 'pointer' }}>Export</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              
+              <div style={{ marginTop: '24px', borderTop: '1px solid #eef0f8', paddingTop: '24px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Bulk Assign Subjects via CSV</h3>
+                <input type="file" accept=".csv" onChange={async (e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  try {
+                    const res = await fetch(`${API_BASE}/classes/bulk-assign-subjects`, {
+                      method: 'POST',
+                      credentials: 'include',
+                      body: formData,
+                    });
+                    if (!res.ok) throw new Error('Upload failed');
+                    alert('Bulk assignment successful!');
+                    const assignRes = await api.get('/classes/all-assignments');
+                    setClassAssignments(assignRes);
+                  } catch (err) { alert('Failed to process CSV file'); }
+                  finally { e.target.value = null; }
+                }} style={{ padding: '8px', border: '1px dashed #d1d5db', borderRadius: '6px', width: '100%' }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {tab === TABS.CALENDAR && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)' }}>School Terms & Calendar</h2>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '24px' }}>
+              {/* Term List & Creation */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Academic Terms</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  {terms.map(t => (
+                    <div key={t.id} onClick={() => fetchTermDays(t.id)} style={{ padding: '12px', borderRadius: '8px', border: `1px solid ${selectedTermId === t.id ? 'var(--blue-accent)' : '#eef0f8'}`, background: selectedTermId === t.id ? 'rgba(37,99,235,0.05)' : 'white', cursor: 'pointer' }}>
+                      <div style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-dark)' }}>{t.name} ({t.academic_year})</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t.start_date} to {t.end_date}</div>
+                    </div>
+                  ))}
+                  {terms.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No terms created yet.</p>}
+                </div>
+
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', margin: '16px 0' }}>Create New Term</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <input type="text" placeholder="Term Name" value={termForm.name} onChange={e => setTermForm({...termForm, name: e.target.value})} style={inputStyle} />
+                    <input type="text" placeholder="Academic Year" value={termForm.academic_year} onChange={e => setTermForm({...termForm, academic_year: e.target.value})} style={inputStyle} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <input type="date" value={termForm.start_date} onChange={e => setTermForm({...termForm, start_date: e.target.value})} style={inputStyle} />
+                      <input type="date" value={termForm.end_date} onChange={e => setTermForm({...termForm, end_date: e.target.value})} style={inputStyle} />
+                    </div>
+                    <button onClick={handleCreateTerm} disabled={submitting} style={{ padding: '12px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>Generate Term Days</button>
+                </div>
+              </div>
+
+              {/* Day Grid */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Calendar View {selectedTermId ? `— Term #${selectedTermId}` : ''}</h3>
+                {!selectedTermId ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Select a term from the left to view and edit its days.</p>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(h => <div key={h} style={{ textAlign: 'center', fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)', background: '#fafbfc', padding: '4px' }}>{h}</div>)}
+                    {termDays.map(d => (
+                      <div key={d.id} title={d.note || d.day_type} style={{
+                        height: '60px', border: '1px solid #eef0f8', borderRadius: '4px',
+                        padding: '4px', position: 'relative',
+                        background: d.day_type === 'SCHOOL_DAY' ? 'white' : (d.day_type === 'PUBLIC_HOLIDAY' ? '#fee2e2' : '#f1f5f9'),
+                        cursor: 'pointer'
+                      }} onClick={async () => {
+                         const type = prompt("Change Day Type (SCHOOL_DAY, PUBLIC_HOLIDAY, SCHOOL_HOLIDAY, STAFF_DEV_DAY):", d.day_type);
+                         if (type) {
+                           const note = prompt("Optional Note:", d.note || "");
+                           try {
+                             await api.put(`/calendar/days/${d.date}`, { day_type: type.toUpperCase(), note: note });
+                             fetchTermDays(selectedTermId);
+                           } catch (err) { alert(err.message); }
+                         }
+                      }}>
+                        <div style={{ fontSize: '10px', color: 'var(--text-dark)', fontWeight: '600' }}>{d.date.split('-')[2]}</div>
+                        {d.cycle_day && <div style={{ fontSize: '9px', color: 'var(--blue-deep)', fontWeight: '700', marginTop: '2px' }}>Day {d.cycle_day}</div>}
+                        {d.note && <div style={{ fontSize: '8px', color: 'var(--text-muted)', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === TABS.ENROLMENT && (
+          <div style={{ maxWidth: '800px' }}>
+             <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Student Subject Enrolment</h2>
+             <div style={{ background: 'white', borderRadius: '12px', padding: '32px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', marginBottom: '24px' }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '24px' }}>Manually enrol or change a student&apos;s subject selection. Grade history is preserved via end dates.</p>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                   <div>
+                      <label style={labelStyle}>Select Student</label>
+                      <select value={enrolmentForm.student_id} onChange={e => {
+                        const sid = e.target.value;
+                        setEnrolmentForm({...enrolmentForm, student_id: sid});
+                        if (sid) {
+                          api.get(`/enrolments/student/${sid}`).then(res => setClassEnrolments(res));
+                        } else { setClassEnrolments([]); }
+                      }} style={inputStyle}>
+                        <option value="">-- Choose Student --</option>
+                        {studentRecords.map(s => <option key={s.student_id} value={s.student_id}>{s.first_name} {s.last_name} ({s.class_name})</option>)}
+                      </select>
+                   </div>
+                   <div>
+                      <label style={labelStyle}>Select Class-Subject</label>
+                      <select value={enrolmentForm.class_subject_id} onChange={e => setEnrolmentForm({...enrolmentForm, class_subject_id: e.target.value})} style={inputStyle}>
+                        <option value="">-- Choose Subject --</option>
+                        {classAssignments.map(ca => (
+                          <option key={ca.class_subject_id} value={ca.class_subject_id}>{ca.class_name} — {ca.subject_name} ({ca.teacher_name})</option>
+                        ))}
+                      </select>
+                   </div>
+                </div>
+                <button onClick={handleEnrolStudent} disabled={submitting || !enrolmentForm.student_id || !enrolmentForm.class_subject_id} style={{ padding: '12px 24px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer', width: '100%' }}>Enrol Student</button>
+             </div>
+
+             {enrolmentForm.student_id && (
+               <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                 <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Current Enrolments</h3>
+                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {classEnrolments.map(e => (
+                      <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid #f5f6fa', borderRadius: '8px' }}>
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-dark)' }}>{e.subject_name}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{e.class_name} | {e.teacher_name}</div>
+                        </div>
+                        <button onClick={async () => {
+                          if (confirm("Setting end date for this enrolment will preserve grade history but the student will no longer be active in this subject. Continue?")) {
+                            try {
+                              await api.delete(`/enrolments/${e.id}`);
+                              const res = await api.get(`/enrolments/student/${enrolmentForm.student_id}`);
+                              setClassEnrolments(res);
+                            } catch (err) { alert(err.message); }
+                          }
+                        }} style={{ padding: '6px 12px', border: '1px solid #fee2e2', background: 'white', color: '#ef4444', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>End Enrolment</button>
+                      </div>
+                    ))}
+                    {classEnrolments.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active subject enrolments found.</p>}
+                 </div>
+               </div>
+             )}
+          </div>
+        )}
+
+        {tab === TABS.TIMETABLE && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)' }}>Timetable Management</h2>
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'white', padding: '12px 20px', borderRadius: '12px', border: '1px solid #eef0f8' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600' }}>Cycle Length:</label>
+                  <input type="number" value={schoolSettings.cycle_length || 6} onChange={e => handleUpdateSetting('cycle_length', e.target.value)} style={{ width: '50px', padding: '4px', borderRadius: '4px', border: '1px solid #d1d5db' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600' }}>Periods/Day:</label>
+                  <input type="number" value={schoolSettings.periods_per_day || 8} onChange={e => handleUpdateSetting('periods_per_day', e.target.value)} style={{ width: '50px', padding: '4px', borderRadius: '4px', border: '1px solid #d1d5db' }} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: '32px' }}>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', background: '#fafbfc', border: '1px solid #eef0f8' }}>Period</th>
+                      {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, i) => (
+                        <th key={i} style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', background: '#fafbfc', border: '1px solid #eef0f8' }}>Day {i + 1}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: parseInt(schoolSettings.periods_per_day || 8) }).map((_, p) => (
+                      <tr key={p}>
+                        <td style={{ padding: '12px', fontWeight: '700', fontSize: '13px', background: '#fafbfc', border: '1px solid #eef0f8', textAlign: 'center' }}>{p + 1}</td>
+                        {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, d) => {
+                          const slotItems = timetableSlots.filter(s => s.cycle_day === d + 1 && s.period_number === p + 1)
+                          return (
+                            <td key={d} style={{ padding: '4px', border: '1px solid #eef0f8', minWidth: '120px', height: '100px', verticalAlign: 'top' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {slotItems.map(s => (
+                                  <div key={s.id} style={{ padding: '6px', background: 'var(--blue-light)', borderRadius: '6px', fontSize: '10px', position: 'relative' }}>
+                                    <div style={{ fontWeight: '700', color: 'var(--blue-deep)' }}>{s.class_name}</div>
+                                    <div style={{ color: 'var(--text-dark)' }}>{s.subject_name}</div>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>{s.teacher_name}</div>
+                                    <button onClick={() => handleDeleteTimetableSlot(s.id)} style={{ position: 'absolute', top: '2px', right: '2px', padding: '0 4px', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
+                                  </div>
+                                ))}
+                                <button onClick={() => setTimetableForm({ ...timetableForm, cycle_day: d + 1, period_number: p + 1 })} style={{ width: '100%', padding: '4px', border: '1px dashed #d1d5db', background: 'none', borderRadius: '4px', color: 'var(--text-muted)', fontSize: '10px', cursor: 'pointer' }}>+ Add</button>
+                              </div>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ position: 'sticky', top: '40px' }}>
+                <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px' }}>Schedule Lesson</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div>
+                      <label style={labelStyle}>Day {timetableForm.cycle_day} · Period {timetableForm.period_number}</label>
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Assign Class-Subject</label>
+                      <select value={timetableForm.class_subject_id} onChange={e => setTimetableForm({ ...timetableForm, class_subject_id: e.target.value })} style={inputStyle}>
+                        <option value="">-- Choose --</option>
+                        {classAssignments.map(ca => (
+                          <option key={ca.class_subject_id} value={ca.class_subject_id}>{ca.class_name} — {ca.subject_name} ({ca.teacher_name})</option>
+                        ))}
+                      </select>
+                    </div>
+                    {formError && tab === TABS.TIMETABLE && <div style={{ color: '#ef4444', fontSize: '12px' }}>{formError}</div>}
+                    {formSuccess && tab === TABS.TIMETABLE && <div style={{ color: '#16a34a', fontSize: '12px' }}>{formSuccess}</div>}
+                    <button onClick={handleAddTimetableSlot} disabled={submitting || !timetableForm.class_subject_id} style={{ padding: '12px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}>
+                      {submitting ? '...' : 'Add to Timetable'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
+

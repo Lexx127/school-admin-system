@@ -1,5 +1,6 @@
 import { DM_Sans, Playfair_Display } from 'next/font/google'
 import './globals.css'
+import GlobalCalendarDrawer from '@/components/GlobalCalendarDrawer'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -23,6 +24,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className={`${dmSans.variable} ${playfair.variable}`} suppressHydrationWarning>
         {children}
+        <GlobalCalendarDrawer />
       </body>
     </html>
   )

@@ -40,7 +40,7 @@ export default function LoginPage() {
 
       {/* LEFT PANEL */}
       <div style={{
-        background: 'var(--blue-deep)',
+        background: 'linear-gradient(145deg, #0f2e61 0%, #123772 48%, #1b4c97 100%)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
@@ -54,8 +54,8 @@ export default function LoginPage() {
         <div style={{
           position: 'absolute',
           width: '600px', height: '600px',
-          background: 'radial-gradient(circle, rgba(37,99,235,0.15) 0%, transparent 70%)',
-          top: '-100px', right: '-200px',
+          background: 'radial-gradient(circle, rgba(147,197,253,0.22) 0%, rgba(37,99,235,0.05) 40%, transparent 72%)',
+          top: '-120px', right: '-210px',
           pointerEvents: 'none',
         }} />
 
@@ -149,9 +149,18 @@ export default function LoginPage() {
         alignItems: 'center',
         justifyContent: 'center',
         padding: '80px 72px',
-        background: 'var(--off-white)',
+        background: 'linear-gradient(180deg, #f7faff 0%, #eef4ff 100%)',
       }}>
-        <div style={{ width: '100%', maxWidth: '400px' }}>
+        <div style={{
+          width: '100%',
+          maxWidth: '420px',
+          background: 'rgba(255,255,255,0.82)',
+          backdropFilter: 'blur(4px)',
+          border: '1px solid rgba(208, 221, 247, 0.8)',
+          borderRadius: '16px',
+          boxShadow: '0 16px 38px rgba(16, 36, 72, 0.12)',
+          padding: '30px',
+        }}>
 
           <h2 style={{
             fontFamily: 'var(--font-playfair)',
@@ -191,8 +200,8 @@ export default function LoginPage() {
               style={{
                 width: '100%',
                 padding: '14px 16px',
-                border: '1.5px solid #dde4f0',
-                borderRadius: '8px',
+              border: '1.5px solid #d8e3f8',
+              borderRadius: '10px',
                 fontFamily: 'var(--font-dm-sans)',
                 fontSize: '14px',
                 color: 'var(--text-dark)',
@@ -201,7 +210,7 @@ export default function LoginPage() {
                 transition: 'border-color 0.2s',
               }}
               onFocus={e => e.target.style.borderColor = 'var(--blue-accent)'}
-              onBlur={e => e.target.style.borderColor = '#dde4f0'}
+              onBlur={e => e.target.style.borderColor = '#d8e3f8'}
             />
           </div>
 
@@ -227,8 +236,8 @@ export default function LoginPage() {
               style={{
                 width: '100%',
                 padding: '14px 16px',
-                border: '1.5px solid #dde4f0',
-                borderRadius: '8px',
+                border: '1.5px solid #d8e3f8',
+                borderRadius: '10px',
                 fontFamily: 'var(--font-dm-sans)',
                 fontSize: '14px',
                 color: 'var(--text-dark)',
@@ -237,7 +246,7 @@ export default function LoginPage() {
                 transition: 'border-color 0.2s',
               }}
               onFocus={e => e.target.style.borderColor = 'var(--blue-accent)'}
-              onBlur={e => e.target.style.borderColor = '#dde4f0'}
+              onBlur={e => e.target.style.borderColor = '#d8e3f8'}
             />
           </div>
 
@@ -264,16 +273,17 @@ export default function LoginPage() {
             style={{
               width: '100%',
               padding: '15px',
-              background: loading ? '#93c5fd' : 'var(--blue-deep)',
+              background: loading ? '#93c5fd' : 'linear-gradient(135deg, #19407d 0%, #2f6df6 100%)',
               color: 'white',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '10px',
               fontFamily: 'var(--font-dm-sans)',
               fontSize: '15px',
               fontWeight: '600',
               cursor: loading ? 'not-allowed' : 'pointer',
               marginTop: '8px',
-              transition: 'background 0.2s',
+              boxShadow: loading ? 'none' : '0 10px 24px rgba(37,99,235,0.25)',
+              transition: 'all 0.2s',
             }}
           >
             {loading ? 'Signing in...' : 'Sign In →'}

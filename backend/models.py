@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean, 
-    Float, Text, Date, DateTime, 
+    Float, Text, Date, DateTime, Time,
     ForeignKey, Enum
 )
 from sqlalchemy.orm import relationship, DeclarativeBase
@@ -32,6 +32,13 @@ class EventType(str, enum.Enum):
     ACADEMIC = "ACADEMIC"
     CULTURAL = "CULTURAL"
     OTHER = "OTHER"
+
+class DayType(str, enum.Enum):
+    SCHOOL_DAY = "SCHOOL_DAY"
+    PUBLIC_HOLIDAY = "PUBLIC_HOLIDAY"
+    SCHOOL_HOLIDAY = "SCHOOL_HOLIDAY"
+    STAFF_DEV_DAY = "STAFF_DEV_DAY"
+    EVENT_DAY = "EVENT_DAY"
 
 class Base(DeclarativeBase):
     pass
@@ -152,6 +159,7 @@ class ClassSubject(Base):
     subject = relationship("Subject", back_populates="class_subjects")
     teacher = relationship("Staff", back_populates="class_subjects")
     assignments = relationship("Assignment", back_populates="class_subject")
+    timetable_slots = relationship("TimetableSlot", back_populates="class_subject")
 
 class StaffClockIn(Base):
     __tablename__ = "staff_clock_ins"
@@ -332,4 +340,58 @@ class Message(Base):
 
     # Relationships
     sender = relationship("User", foreign_keys=[sender_id])
-    receiver = relationship("User", foreign_keys=[receiver_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
+
+class SchoolTerm(Base):
+    __tablename__ = "school_terms"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    academic_year = Column(String, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+
+    # Relationships
+    calendar_days = relationship("SchoolCalendarDay", back_populates="term", cascade="all, delete-orphan")
+
+class SchoolCalendarDay(Base):
+    __tablename__ = "school_calendar_days"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(Date, unique=True, nullable=False, index=True)
+    day_type = Column(Enum(DayType), nullable=False)
+    cycle_day = Column(Integer, nullable=True)
+    note = Column(String, nullable=True)
+    term_id = Column(Integer, ForeignKey("school_terms.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Relationships
+    term = relationship("SchoolTerm", back_populates="calendar_days")
+    created_by_user = relationship("User", foreign_keys=[created_by])
+
+class StudentSubjectEnrolment(Base):
+    __tablename__ = "student_subject_enrolments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    class_subject_id = Column(Integer, ForeignKey("class_subjects.id"), nullable=False)
+    academic_year = Column(String, nullable=False)
+    enrolled_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=True)
+
+    # Relationships
+    student = relationship("Student", backref="subject_enrolments")
+    class_subject = relationship("ClassSubject", backref="enrolments")
+
+class TimetableSlot(Base):
+    __tablename__ = "timetable_slots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    class_subject_id = Column(Integer, ForeignKey("class_subjects.id"), nullable=False)
+    cycle_day = Column(Integer, nullable=False) # 1-6
+    period_number = Column(Integer, nullable=False)
+    start_time = Column(Time, nullable=True)
+    end_time = Column(Time, nullable=True)
+
+    # Relationships
+    class_subject = relationship("ClassSubject", back_populates="timetable_slots")

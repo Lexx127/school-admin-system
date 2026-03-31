@@ -7,6 +7,11 @@ import { api } from '@/lib/api'
 export default function StudentDashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
+
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm_password: '' })
+
   const [homework, setHomework] = useState({ upcoming: [], past: [] })
   const [grades, setGrades] = useState([])
   const [attendance, setAttendance] = useState(null)
@@ -19,6 +24,8 @@ export default function StudentDashboard() {
   const [messageForm, setMessageForm] = useState({ receiver_id: '', subject: '', body: '' })
   const [staffSearch, setStaffSearch] = useState('')
   const [showStaffDropdown, setShowStaffDropdown] = useState(false)
+  const [timetable, setTimetable] = useState([])
+  const [schoolSettings, setSchoolSettings] = useState({})
 
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -26,7 +33,7 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      const [userData, homeworkData, gradesData, attendanceData, noticeData, eventData, inboxData, staffData] =
+      const [userData, homeworkData, gradesData, attendanceData, noticeData, eventData, inboxData, staffData, timetableData, settingsData] =
         await Promise.allSettled([
           api.get('/auth/me'),
           api.get('/homework/student/mine'),
@@ -36,6 +43,8 @@ export default function StudentDashboard() {
           api.get('/notices/events/upcoming'),
           api.get('/communications/inbox'),
           api.get('/users/staff/all'),
+          api.get('/timetable/student/year-view'),
+          api.get('/settings/'),
         ])
 
       if (userData.status === 'rejected') { router.push('/'); return }
@@ -48,6 +57,8 @@ export default function StudentDashboard() {
       if (eventData.status === 'fulfilled') setEvents(eventData.value)
       if (inboxData?.status === 'fulfilled') setInbox(inboxData.value)
       if (staffData?.status === 'fulfilled') setStaffList(staffData.value)
+      if (timetableData?.status === 'fulfilled') setTimetable(timetableData.value)
+      if (settingsData?.status === 'fulfilled') setSchoolSettings(settingsData.value)
 
       setLoading(false)
     }
@@ -87,6 +98,48 @@ export default function StudentDashboard() {
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--off-white)' }}>
 
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ fontFamily: 'var(--font-playfair)', fontSize: '20px', marginBottom: '16px', color: 'var(--text-dark)', textAlign: 'left' }}>Change Password</h3>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              if (passwordForm.new_password !== passwordForm.confirm_password) {
+                return alert("New passwords do not match!")
+              }
+              try {
+                const res = await api.put('/auth/change-password', {
+                  current_password: passwordForm.current_password,
+                  new_password: passwordForm.new_password
+                })
+                alert("Password changed successfully!")
+                setShowPasswordModal(false)
+                setPasswordForm({ current_password: '', new_password: '', confirm_password: '' })
+              } catch (err) { alert(err.message) }
+            }} style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Current Password</label>
+                <input type="password" required value={passwordForm.current_password} onChange={e => setPasswordForm({...passwordForm, current_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.new_password} onChange={e => setPasswordForm({...passwordForm, new_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--text-dark)' }}>Confirm New Password</label>
+                <input type="password" required minLength="6" value={passwordForm.confirm_password} onChange={e => setPasswordForm({...passwordForm, confirm_password: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowPasswordModal(false)} style={{ padding: '10px 16px', border: '1px solid #d1d5db', background: 'white', color: 'var(--text-dark)', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Cancel</button>
+                <button type="submit" style={{ padding: '10px 16px', border: 'none', background: 'var(--blue-deep)', color: 'white', borderRadius: '6px', cursor: 'pointer', fontWeight: '500' }}>Update Password</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+
       {/* SIDEBAR */}
       <div style={{
         width: '260px', background: 'var(--blue-deep)',
@@ -120,6 +173,7 @@ export default function StudentDashboard() {
           {[
             { label: 'My School', items: [
               { name: 'Dashboard', icon: '⊞' },
+              { name: 'My Timetable', icon: '⏳' },
               { name: 'Homework', icon: '📖', badge: homework.upcoming?.length || null },
               { name: 'My Grades', icon: '📊' },
               { name: 'Attendance', icon: '✓' },
@@ -162,8 +216,23 @@ export default function StudentDashboard() {
 
         <div style={{
           padding: '16px 24px', borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', gap: '12px',
+          display: 'flex', alignItems: 'center', gap: '12px', position: 'relative',
         }}>
+          {showProfileDropdown && (
+            <div style={{
+               position: 'absolute', bottom: '100%', left: '16px', right: '16px',
+               background: 'white', borderRadius: '8px', padding: '8px', marginBottom: '8px',
+               boxShadow: '0 4px 12px rgba(0,0,0,0.15)', zIndex: 20
+            }}>
+               <button 
+                  onClick={() => { setShowPasswordModal(true); setShowProfileDropdown(false); }} 
+                  style={{ width: '100%', padding: '10px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', fontWeight: '600', color: 'var(--text-dark)', cursor: 'pointer', borderRadius: '6px' }}
+                  onMouseOver={(e) => e.target.style.background = '#f5f6fa'}
+                  onMouseOut={(e) => e.target.style.background = 'none'}
+               >Change Password</button>
+            </div>
+          )}
+          <div onClick={() => setShowProfileDropdown(!showProfileDropdown)} style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }}>
           <div style={{
             width: '36px', height: '36px', background: 'rgba(37,99,235,0.3)',
             border: '2px solid rgba(37,99,235,0.5)', borderRadius: '50%',
@@ -179,6 +248,7 @@ export default function StudentDashboard() {
             <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>
               {user?.email}
             </div>
+          </div>
           </div>
           <button onClick={handleLogout} style={{
             background: 'none', border: 'none',
@@ -211,10 +281,10 @@ export default function StudentDashboard() {
           {[
             {
               icon: '📊',
-              value: attendance ? `${attendance.attendance_percentage}%` : '—',
+              value: attendance ? `${attendance.summary?.attendance_percentage ?? attendance.attendance_percentage ?? 0}%` : '—',
               label: 'Attendance Rate',
-              sub: attendance ? `${attendance.days_attended} of ${attendance.total_days} days` : 'No data yet',
-              subColor: attendance?.attendance_percentage >= 90 ? '#16a34a' : '#e67e22',
+              sub: attendance ? `${attendance.summary?.days_attended ?? attendance.days_attended ?? 0} of ${attendance.summary?.total_days ?? attendance.total_days ?? 0} days` : 'No data yet',
+              subColor: (attendance?.summary?.attendance_percentage ?? attendance?.attendance_percentage) >= 90 ? '#16a34a' : '#e67e22',
             },
             {
               icon: '📚',
@@ -463,16 +533,16 @@ export default function StudentDashboard() {
                   fontFamily: 'var(--font-playfair)', fontSize: '48px',
                   color: 'white', fontWeight: '700', lineHeight: '1', marginBottom: '4px',
                 }}>
-                  {attendance.attendance_percentage}%
+                  {attendance.summary?.attendance_percentage ?? attendance.attendance_percentage ?? 0}%
                 </div>
                 <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.5)', marginBottom: '20px' }}>
-                  {attendance.days_attended} present · {attendance.days_absent} absent · {attendance.days_late} late
+                  {attendance.summary?.days_attended ?? attendance.days_attended ?? 0} present · {attendance.summary?.days_absent ?? attendance.days_absent ?? 0} absent · {attendance.summary?.days_late ?? attendance.days_late ?? 0} late
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: '4px', height: '6px' }}>
                   <div style={{
                     height: '6px', borderRadius: '4px',
-                    width: `${attendance.attendance_percentage}%`,
-                    background: attendance.attendance_percentage >= 90 ? '#4ade80' : '#fbbf24',
+                    width: `${attendance.summary?.attendance_percentage ?? attendance.attendance_percentage ?? 0}%`,
+                    background: (attendance.summary?.attendance_percentage ?? attendance.attendance_percentage ?? 0) >= 90 ? '#4ade80' : '#fbbf24',
                   }} />
                 </div>
               </div>
@@ -558,6 +628,53 @@ export default function StudentDashboard() {
           </div>
         </div>
           </>
+        ) : activeTab === 'My Timetable' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>My Timetable</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', background: '#fafbfc', border: '1px solid #eef0f8' }}>Period</th>
+                    {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, i) => (
+                      <th key={i} style={{ padding: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', background: '#fafbfc', border: '1px solid #eef0f8' }}>Day {i+1}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: parseInt(schoolSettings.periods_per_day || 8) }).map((_, p) => (
+                    <tr key={p}>
+                      <td style={{ padding: '12px', fontWeight: '700', fontSize: '13px', background: '#fafbfc', border: '1px solid #eef0f8', textAlign: 'center' }}>{p + 1}</td>
+                      {Array.from({ length: parseInt(schoolSettings.cycle_length || 6) }).map((_, d) => {
+                        const slots = timetable.filter(s => s.cycle_day === d + 1 && s.period_number === p + 1)
+                        return (
+                          <td key={d} style={{ padding: '10px', border: '1px solid #eef0f8', minWidth: '120px', height: '80px', verticalAlign: 'top' }}>
+                            {slots.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }}>
+                                {slots.map(slot => (
+                                  <div key={slot.id} style={{
+                                    padding: '8px',
+                                    background: slot.is_enrolled ? 'var(--blue-light)' : '#f3f4f6',
+                                    borderRadius: '8px',
+                                    border: slot.is_enrolled ? '1px solid #bfdbfe' : '1px solid #e5e7eb',
+                                  }}>
+                                    <div style={{ fontSize: '11px', fontWeight: '700', color: slot.is_enrolled ? 'var(--blue-deep)' : '#6b7280' }}>
+                                      {slot.subject_name} ({slot.class_name})
+                                    </div>
+                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>{slot.teacher_name}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : activeTab === 'Homework' ? (
           <div>
             <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Upcoming Assignments</h2>

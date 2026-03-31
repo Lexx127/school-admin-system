@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import (
     User, Staff, Student, Parent, ParentStudent,
-    Grade, Assignment, ClassSubject, UserRole
+    Grade, Assignment, ClassSubject, UserRole, StudentSubjectEnrolment
 )
 from auth import require_role
 from datetime import datetime
@@ -61,6 +61,21 @@ def enter_grades(
             raise HTTPException(
                 status_code=400,
                 detail=f"Marks awarded ({entry.marks_awarded}) exceed max marks ({assignment.max_marks}) for student {entry.student_id}"
+            )
+
+        enrolment = db.query(StudentSubjectEnrolment).filter(
+            StudentSubjectEnrolment.student_id == entry.student_id,
+            StudentSubjectEnrolment.class_subject_id == assignment.class_subject_id,
+            StudentSubjectEnrolment.enrolled_date <= assignment.due_date
+        ).order_by(StudentSubjectEnrolment.enrolled_date.desc()).first()
+
+        if enrolment and enrolment.end_date and enrolment.end_date < assignment.due_date:
+            enrolment = None
+
+        if not enrolment:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Student {entry.student_id} is not actively enrolled for this assignment's subject"
             )
 
         # Check if grade already exists for this student

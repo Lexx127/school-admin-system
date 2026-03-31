@@ -1,0 +1,738 @@
+>
+>
+>
+>
+>AGAPE COLLEGE
+>
+>School Administration System
+>
+>
+>
+>
+>Development Planning Report
+>
+>
+>
+>Prepared: March 2026
+>
+>
+>
+>
+>
+>
+>1. Current State of the Project
+>
+>The system is built on a FastAPI backend and a Next.js frontend. All six dashboards are implemented with the following completion status:
+>
+>
+>Dashboard / Area
+>Status
+>Notes
+>Admin Dashboard
+>
+>DONE
+>Overview, Students, Staff, Parents, Fees, Communications all working
+>Teacher Dashboard
+>
+>BUG
+>Tabs built; upcoming assignments and awaiting grading show 0
+>Principal Dashboard
+>
+>DONE
+>All tabs functional
+>Student Dashboard
+>
+>DONE
+>All tabs functional
+>Parent Dashboard
+>
+>DONE
+>All tabs functional
+>Kiosk
+>
+>DONE
+>Staff clock-in and clock-out functional
+>Backend Routers
+>
+>DONE
+>Auth, Users, Attendance, Homework, Grades, Notices, Fees, Communications
+>Teacher Assignments
+>
+>MISSING
+>No way to assign teachers to classes or subjects after account creation
+>Password Change
+>
+>MISSING
+>Users cannot change their own passwords
+>Calendar System
+>
+>MISSING
+>No calendar, term management, or school day tracking
+>Timetable System
+>
+>MISSING
+>No lesson scheduling or cycle-based timetable
+>Subject Enrolment
+>
+>MISSING
+>No per-student subject selection within a class
+>Attendance Exports
+>
+>MISSING
+>No Excel export of attendance records
+>
+>
+>
+>
+>
+>2. Immediate Bug Fixes
+>
+>These are existing issues in already-built features that must be resolved before new development begins.
+>
+>
+>2.1 Teacher Dashboard — Zero Counts
+>
+>
+>Bug A: Upcoming Assignments Always Shows 0
+>
+>The seed script creates assignments with due dates relative to the day the seed was run. Since that day has passed, all assignments now have past due dates. The frontend filter is:
+>
+>
+>
+>assignments.filter(a =&gt; !a.is_past_due)
+>
+>Since all assignments are now past due, this returns an empty array. Fix: re-seed the database, or add new assignments with future due dates via the admin UI.
+>
+>
+>Bug B: Awaiting Grading Always Shows 0
+>
+>This is a backend logic bug in homework.py. The student_count for each assignment is calculated as:
+>
+>
+>
+>valid_students = [s for s in class.students if s.user.created_at.date() &lt;= a.due_date]
+>
+>Because students and assignments are seeded simultaneously, student created_at timestamps are on the same day as or after the assignment due dates, so valid_students is always empty, making student_count = 0. The frontend then evaluates grades_entered &lt; student_count as 0 &lt; 0 = false, so nothing ever appears as awaiting grading.
+>
+>Importantly, the original filtering logic is correct in principle. A student enrolled after an assignment was created should not have that assignment counted against them in grade records. Removing the filter entirely would be wrong. The bug is not what is being filtered but which date field is used as the enrolment proxy. The code uses s.user.created_at as a stand-in for when the student joined the class, which works in a live deployment where accounts are created at enrolment time, but breaks under seeded test data where both are created simultaneously.
+>
+>Short-term fix (Phase 1): the seed data is the problem, not the logic. Re-seeding with correct relative dates restores the intended behaviour. No code change to the homework router is required for this specific issue.
+>
+>Long-term fix (Phase 5): once StudentSubjectEnrolment is introduced, update the valid_students filter from s.user.created_at &lt;= a.due_date to s.enrolment.enrolled_date &lt;= a.due_date. This replaces the account creation date proxy with the purpose-built enrolment date field, making the logic semantically accurate and robust regardless of when accounts were created.
+>
+>
+>2.2 Attendance Authorization — Must Restrict to Homeroom Teachers
+>
+>The current attendance router uses an OR condition, allowing any teacher assigned to any subject in a class to mark that class's daily attendance. This is incorrect. Daily attendance is a homeroom function only.
+>
+>Fix: remove the class_subject check from the attendance authorization logic. Only allow the homeroom teacher (and principal/admin) to mark attendance for a given class. Teachers without a homeroom class should not see the Attendance tab in their dashboard sidebar at all.
+>
+>
+>
+>
+>
+>
+>3. Teacher Assignment System
+>
+>Currently, creating a teacher account only creates a User and Staff database record. There is no mechanism to assign that teacher to a class, a subject, or a homeroom. This is a critical gap — teachers cannot teach anything until these assignments exist.
+>
+>
+>3.1 Data Model — No Changes Required
+>
+>The data model already supports everything needed. The ClassSubject table links a class, a subject, and a teacher. The Class table has a homeroom_teacher_id field. The gap is purely in the admin interface and the backend endpoints to manage these relationships.
+>
+>
+>3.2 New Backend Endpoints Required
+>
+>
+>Endpoint
+>Method
+>Purpose
+>POST /users/admin/assign/class-subject
+>POST
+>Create a ClassSubject row linking teacher, class, and subject
+>DELETE /users/admin/assign/class-subject/{id}
+>DELETE
+>Remove a class-subject assignment
+>PUT /users/admin/classes/{id}/homeroom-teacher
+>PUT
+>Set or change the homeroom teacher for a class
+>GET /users/admin/staff/all
+>GET
+>Return all staff with their current assignments and homeroom class
+>GET /users/subjects/all
+>GET
+>Return all subjects (needed to populate assignment dropdowns)
+>POST /users/admin/assign/bulk-csv
+>POST
+>Accept a CSV upload and create multiple ClassSubject rows in one request
+>
+>
+>3.3 Two Assignment Workflows
+>
+>
+>Option A — Bulk Matrix UI
+>
+>The admin sees a grid: rows are classes, columns are subjects, each cell is a dropdown of available teachers. The entire timetable of assignments can be set from one screen. Best used for initial setup or reviewing the full picture at a glance.
+>
+>
+>Option B — CSV Import
+>
+>The admin downloads a template file and uploads it with all assignments filled in. The backend validates each row and returns a summary of what was created, skipped, or failed. A downloadable template must be provided in the UI so admins know the exact required format.
+>
+>CSV format:
+>
+>
+>
+>teacher_email, class_name, subject_code, academic_year
+>
+>Both options must be available. CSV suits start-of-year bulk setup; the matrix UI suits mid-year adjustments.
+>
+>
+>3.4 Homeroom vs Subject Teacher
+>
+>
+>A teacher can hold both roles simultaneously — homeroom teacher of 10A and subject teacher of Mathematics for 10A and 10B.
+>
+>
+>Homeroom status is set by admin via the PUT /users/admin/classes/{id}/homeroom-teacher endpoint.
+>
+>
+>If a teacher is a homeroom teacher, they must be assigned to a class. This is enforced: the homeroom assignment and the ClassSubject assignment are separate actions but both are required for a full setup.
+>
+>
+>Teachers can view their own assignments (read-only). Only admin and principal can modify them.
+>
+>
+>The Attendance tab in the teacher dashboard sidebar is only visible if the logged-in teacher has a homeroom class. It is hidden entirely for non-homeroom teachers.
+>
+>
+>3.5 Staff Creation Form — Missing Fields
+>
+>The current staff creation form is missing employee_number and department, which are part of the Staff database model and the StaffCreate Pydantic schema. These fields must be added to the form.
+>
+>
+>
+>
+>
+>
+>4. Calendar and Timetable System
+>
+>This is the largest new feature. It spans a new data model, a unified events system, a cycle-based timetable, and a FullCalendar-powered frontend widget.
+>
+>
+>4.1 New Database Tables
+>
+>
+>SchoolTerm
+>
+>Defines the academic calendar structure. All attendance calculations and timetable queries are scoped to a term.
+>
+>
+>Field
+>Type
+>Purpose
+>id
+>Integer PK
+>Primary key
+>name
+>String
+>e.g. &quot;Term 1&quot;, &quot;Term 2&quot;
+>academic_year
+>String
+>e.g. &quot;2025&quot;
+>start_date
+>Date
+>First day of the term (inclusive)
+>end_date
+>Date
+>Last day of the term (inclusive)
+>
+>
+>
+>
+>SchoolCalendarDay
+>
+>The authoritative source of truth for every school day. When a term is created, weekday rows are auto-generated as SCHOOL_DAY. Exceptions (holidays, development days, events) are layered on top. Also tracks the cycle day for timetable resolution.
+>
+>
+>Field
+>Type
+>Purpose
+>id
+>Integer PK
+>Primary key
+>date
+>Date (unique)
+>The calendar date
+>day_type
+>Enum
+>SCHOOL_DAY, PUBLIC_HOLIDAY, SCHOOL_HOLIDAY, STAFF_DEV_DAY, EVENT_DAY
+>cycle_day
+>Integer (nullable)
+>1–6 for the school's cycle; null on non-school days
+>note
+>String (nullable)
+>e.g. &quot;Zimbabwe Independence Day&quot;
+>term_id
+>FK SchoolTerm (nullable)
+>Links the day to its term
+>created_by
+>FK User
+>Who set or modified this day record
+>
+>
+>Important: When a public holiday falls on what would have been cycle day 3, that date gets cycle_day = null. The next school day picks up from cycle day 4. No lessons are lost — the sequence simply shifts forward. This must be handled by the backend when auto-generating calendar days for a new term.
+>
+>
+>
+>
+>TimetableSlot
+>
+>Defines when each class-subject pair is taught, referenced by cycle day and period number rather than by calendar day of the week.
+>
+>
+>Field
+>Type
+>Purpose
+>id
+>Integer PK
+>Primary key
+>class_subject_id
+>FK ClassSubject
+>Which class + subject + teacher this slot belongs to
+>cycle_day
+>Integer (1–6)
+>Which day of the cycle this lesson falls on
+>period_number
+>Integer
+>Which period within the day
+>start_time
+>Time
+>Lesson start time
+>end_time
+>Time
+>Lesson end time
+>
+>
+>
+>
+>StudentSubjectEnrolment
+>
+>Tracks which subjects each individual student is enrolled in. This is required because within a single homeroom class, different students may take different subjects (e.g. Physics vs History in Year 11).
+>
+>
+>Field
+>Type
+>Purpose
+>id
+>Integer PK
+>Primary key
+>student_id
+>FK Student
+>The enrolled student
+>class_subject_id
+>FK ClassSubject
+>The specific class-subject combination
+>academic_year
+>String
+>e.g. &quot;2025&quot;
+>enrolled_date
+>Date
+>When the student was enrolled in this subject
+>end_date
+>Date (nullable)
+>Set if student changes subjects mid-year; preserves grade history
+>
+>
+>Mid-year subject changes: When a student switches from Physics to History, the Physics enrolment gets an end_date rather than being deleted. This preserves all associated grades and homework records. The student's active enrolments are those where end_date is null.
+>
+>
+>4.2 Event System — Unified with Calendar
+>
+>The existing Event model is expanded rather than replaced. Events posted via the Notices &amp; Events router automatically appear on the calendar. The calendar reads from the same events table, filtered by audience and class.
+>
+>
+>Add event_category field to Event: ACADEMIC, SPORT, CULTURAL, HOLIDAY, MEETING, STAFF_DEV, OTHER
+>
+>
+>Calendar widget reads from: SchoolCalendarDay (for holidays and school day types) + Event (for posted events)
+>
+>
+>No duplicate storage — one record, displayed in both places
+>
+>
+>4.3 Who Can Edit the Calendar
+>
+>
+>SUPER_ADMIN (Admin/Director): full edit rights — create terms, mark holidays, add school events, manage cycle day assignments
+>
+>
+>PRINCIPAL: can add and edit events, mark school-specific days (e.g. sports day, exam weeks)
+>
+>
+>TEACHER: read-only on calendar; can post events via the existing Notices &amp; Events flow which then appear on the calendar
+>
+>
+>STUDENT / PARENT: read-only, audience-filtered view
+>
+>
+>Note: There is no separate Director role. Directors log in with the PRINCIPAL role and have access to the same dashboard and calendar editing capabilities.
+>
+>
+>4.4 Cycle Timetable — Flexible Configuration
+>
+>The cycle length and period structure are stored in SchoolSettings rather than hardcoded, making the system adaptable to different scheduling structures. The following settings must be configurable by admin:
+>
+>
+>cycle_length: number of days in one cycle (default 6)
+>
+>
+>periods_per_day: how many lessons per day
+>
+>
+>period_1_start through period_N_start/end: times for each period
+>
+>
+>cycle_reset_at_term_start: boolean — whether the cycle resets to Day 1 at the start of each new term or continues rolling from where the previous term ended
+>
+>
+>
+>These must be confirmed with Agape College before the timetable system is built, as the cycle behaviour directly affects how SchoolCalendarDay rows are generated.
+>
+>
+>4.5 Conflict Detection
+>
+>Every TimetableSlot insert or update triggers two hard validation checks on the backend:
+>
+>
+>Teacher conflict: A teacher cannot appear in two TimetableSlot rows with the same cycle_day + period_number. If a conflict is detected, the API returns an error identifying exactly which existing slot conflicts, e.g. &quot;Mr. Ndlovu is already teaching 10A History on Day 3 Period 4.&quot;
+>
+>
+>Class conflict: A class cannot appear in two TimetableSlot rows with the same cycle_day + period_number. Error message example: &quot;10B already has a lesson scheduled on Day 3 Period 4 (History with Mr. Ndlovu).&quot;
+>
+>
+>4.6 Timetable Display Logic
+>
+>The timetable is displayed at the year level, not just the class level. On any given cycle day and period, all subjects taking place across all classes in a year are shown. Students enrolled in a particular subject see their own lesson highlighted. This means:
+>
+>
+>A student in 11B enrolled in Physics sees: &quot;Period 6 — Physics with Mrs. Dube&quot; (highlighted) and &quot;Period 6 — History with Mr. Ndlovu&quot; (greyed out)
+>
+>
+>A student in 11B enrolled in History sees the reverse
+>
+>
+>A personal timetable view is derived by filtering the year-level timetable through the student's active subject enrolments
+>
+>
+>4.7 Frontend — FullCalendar
+>
+>The calendar is implemented using FullCalendar (@fullcalendar/react). Two surfaces are required:
+>
+>
+>Dashboard Widget (7-Day Strip)
+>
+>
+>Visible on every dashboard's main overview tab
+>
+>
+>Shows the current day plus the next six days
+>
+>
+>Displays events, holidays, and current cycle day
+>
+>
+>Clicking the widget or a specific day opens the full calendar drawer
+>
+>
+>Role-filtered: students and parents only see events relevant to them
+>
+>
+>Full Calendar Drawer
+>
+>
+>Accessible from the side navigation on every dashboard
+>
+>
+>Three views selectable from a dropdown: Week, Month, Term
+>
+>
+>Term view shows the full term with all school days, holidays, and events in context
+>
+>
+>Admins and principals see an &quot;Add Event&quot; button that opens a form inline
+>
+>
+>Events are colour-coded by type (academic, sport, holiday, staff dev, etc.)
+>
+>
+>
+>
+>
+>
+>5. Attendance Enhancements
+>
+>
+>5.1 Term-Aware and Holiday-Aware Calculations
+>
+>Attendance percentages must be calculated against actual school days within a term, not total calendar days. The formula becomes:
+>
+>
+>
+>valid_days = SchoolCalendarDay rows where day_type = SCHOOL_DAY within the current term
+>
+>percentage = (present + late records on valid_days) / valid_days * 100
+>
+>Days where day_type is PUBLIC_HOLIDAY, SCHOOL_HOLIDAY, or STAFF_DEV_DAY are excluded from valid_days entirely. A student absent on a public holiday is never penalised.
+>
+>
+>5.2 Excel Attendance Export
+>
+>Homeroom teachers, principals, and admins must be able to download attendance records as a formatted Excel file for printing and archiving. Two export types are required:
+>
+>
+>Weekly Export
+>
+>
+>URL: GET /attendance/export/weekly?class_id=&amp;week_start=YYYY-MM-DD
+>
+>
+>Shows all school days in the selected week (Mon–Fri)
+>
+>
+>Non-school days within the week are auto-marked and greyed out
+>
+>
+>Termly Export
+>
+>
+>URL: GET /attendance/export/termly?class_id=&amp;term_id=
+>
+>
+>Shows all school days across the full term
+>
+>
+>Columns span the entire term; may be wide — landscape orientation recommended
+>
+>
+>Excel File Format
+>
+>Both exports follow the same structure:
+>
+>
+>Row 1: &quot;Homeroom Class: [name]&quot; merged across columns, &quot;Homeroom Teacher: [name]&quot; in the right half
+>
+>
+>Row 2: &quot;Academic Year: [year]&quot; and &quot;Term: [term name]&quot;
+>
+>
+>Row 3: blank spacer
+>
+>
+>Row 4 (header): Student Name | Date of Birth | [date 1] | [date 2] | ... one column per school day
+>
+>
+>Rows 5+: one row per student, with P / A / L / H in each day cell
+>
+>
+>Cell colour coding: green for P, red for A, amber for L, grey for H (holiday/non-school)
+>
+>
+>Generated with openpyxl on the backend and returned as a streaming file download
+>
+>The user is prompted by the browser to download the file. No preview is shown in the app. The user can then print directly from Excel or a compatible spreadsheet application.
+>
+>
+>
+>
+>
+>6. Student Subject Enrolment
+>
+>Because students within the same homeroom class can take different subjects, subject enrolment must be tracked per student rather than assumed for all students in a class.
+>
+>
+>6.1 Impact on Existing Features
+>
+>Introducing StudentSubjectEnrolment changes the behaviour of several existing systems:
+>
+>
+>Feature
+>Impact
+>Homework
+>Assignments are only visible to students enrolled in that subject. A Physics assignment does not appear for a student not enrolled in Physics.
+>Grades
+>Grade records only exist where a StudentSubjectEnrolment exists. Grade report only shows the student's enrolled subjects.
+>Timetable
+>A student's personal timetable is derived from their enrolments, not their class.
+>Teacher Dashboard
+>Student count on assignments should reflect only enrolled students, not all students in the class.
+>Attendance
+>Unaffected. Attendance remains homeroom-based and class-wide.
+>
+>
+>6.2 Workflow
+>
+>
+>Admin sets subject enrolments at the time of student registration or at the start of each academic year.
+>
+>
+>Mid-year subject changes are allowed. The existing enrolment receives an end_date. A new enrolment row is created for the new subject. All historical grades and homework for the original subject are preserved.
+>
+>
+>Students and parents see their enrolments as read-only.
+>
+>
+>Admin and principal can modify enrolments from the student management section.
+>
+>
+>
+>
+>
+>
+>7. Password Change
+>
+>All users must be able to change their own passwords from within their dashboard. This is a simple but necessary feature.
+>
+>
+>7.1 Backend
+>
+>
+>New endpoint: PUT /auth/change-password
+>
+>
+>Accepts: current_password, new_password
+>
+>
+>Validates that current_password matches the stored hash before updating
+>
+>
+>Returns an error if the current password is wrong, preventing unauthorised changes
+>
+>
+>All roles have access to this endpoint
+>
+>
+>7.2 Frontend
+>
+>
+>Each dashboard needs a consistent access point — clicking the user's name or a profile icon in the top bar opens a small dropdown or modal
+>
+>
+>The change password form has three fields: Current Password, New Password, Confirm New Password
+>
+>
+>Client-side validation ensures New Password and Confirm New Password match before the request is sent
+>
+>
+>On success, show a confirmation message. Do not force a logout.
+>
+>
+>
+>
+>
+>8. Build Roadmap
+>
+>The following order is recommended. Each phase completes a coherent, testable unit before the next begins.
+>
+>
+>Phase
+>Name
+>What Gets Built
+>Depends On
+>1
+>Immediate Bug Fixes
+>Re-seed database with correct relative dates to restore intended student_count behaviour; restrict attendance to homeroom teachers only
+>Nothing
+>2
+>Teacher Assignment System
+>New backend endpoints for class-subject assignment and homeroom assignment; rebuilt Staff tab in admin dashboard with matrix UI and CSV import; hide attendance tab for non-homeroom teachers
+>Phase 1
+>3
+>Password Change
+>PUT /auth/change-password endpoint; profile dropdown on all dashboards with change password form
+>Phase 1
+>4
+>School Terms and Calendar Days
+>SchoolTerm model and CRUD endpoints; SchoolCalendarDay model; auto-generation of school days when a term is created; update attendance calculations to be term-aware and holiday-aware
+>Phase 2
+>5
+>Student Subject Enrolment
+>StudentSubjectEnrolment model; admin enrolment management UI; update homework and grades queries to filter by enrolment; mid-year change workflow with end_date
+>Phase 2
+>6
+>Timetable System
+>TimetableSlot model; cycle day configuration in SchoolSettings; conflict detection on insert; timetable entry UI for admin; year-level timetable display with personal view for students
+>Phases 4 and 5
+>7
+>Calendar Frontend
+>FullCalendar integration; 7-day dashboard widget on all dashboards; full calendar drawer with week/month/term views; role-filtered event display; admin/principal event creation from calendar
+>Phase 4
+>8
+>Attendance Excel Export
+>openpyxl weekly and termly export endpoints; download trigger on teacher and admin dashboards; formatted spreadsheet with colour-coded cells
+>Phase 4
+>9
+>Production Readiness
+>Move API URL to environment variable; HTTPS cookie settings; deployment configuration (Render + Vercel or equivalent); README setup instructions
+>All phases
+>
+>
+>
+>
+>
+>9. Decisions Needed Before Development
+>
+>The following must be confirmed before the relevant phases begin. Development can proceed on Phases 1–3 immediately.
+>
+>
+>#
+>Decision
+>Detail
+>1
+>Confirm cycle structure with school
+>Needed before Phase 6. Specifically: cycle length (confirm 6), periods per day, period start/end times, and whether the cycle resets to Day 1 at the start of each new term or continues rolling from where the previous term ended.
+>2
+>Confirm term dates for 2025/2026
+>Needed to seed SchoolTerm and SchoolCalendarDay. Start and end dates for each term in the academic year.
+>3
+>Confirm public holidays list
+>A list of Zimbabwe public holidays for the academic year so they can be pre-loaded into SchoolCalendarDay during the term generation process.
+>
+>
+>
+>
+>
+>10. Summary
+>
+>The Agape College School Administration System is approximately 85% complete as a baseline CRUD system. The remaining work transforms it from a record-keeping tool into a fully operational school management platform. In summary:
+>
+>
+>
+>
+>2 bugs to fix immediately
+>
+>
+>5 missing features to build (teacher assignments, calendar, timetable, subject enrolment, attendance exports)
+>
+>
+>1 small utility feature (password change)
+>
+>
+>3 things to confirm with the school before certain phases can begin
+>
+>
+>9 development phases, each testable in isolation
+>
+>
+>
+>Total new database tables: 4 (SchoolTerm, SchoolCalendarDay, TimetableSlot, StudentSubjectEnrolment)
+>
+>Total modified database tables: 1 (Event — expanded fields)
+>
+>Total new backend endpoints: approximately 20–25 across all phases
+>
+>Total new frontend surfaces: 7 (assignment matrix, CSV import, calendar widget, calendar drawer, timetable view, subject enrolment UI, password change)
+>
+>
+>
