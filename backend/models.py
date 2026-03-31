@@ -285,3 +285,51 @@ class SchoolSettings(Base):
 
     # Relationships
     updated_by_user = relationship("User", foreign_keys=[updated_by])
+
+
+class Fee(Base):
+    __tablename__ = "fees"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    academic_year = Column(String, nullable=False)
+    term = Column(String, nullable=False)
+    amount_due = Column(Float, nullable=False)
+    due_date = Column(Date, nullable=False)
+    is_paid = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    student = relationship("Student", backref="fees")
+    payments = relationship("FeePayment", back_populates="fee")
+
+
+class FeePayment(Base):
+    __tablename__ = "fee_payments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fee_id = Column(Integer, ForeignKey("fees.id"), nullable=False)
+    amount_paid = Column(Float, nullable=False)
+    payment_date = Column(DateTime, default=datetime.utcnow)
+    payment_method = Column(String, nullable=True)
+    recorded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Relationships
+    fee = relationship("Fee", back_populates="payments")
+    recorded_by_user = relationship("User", foreign_keys=[recorded_by])
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subject = Column(String, nullable=True)
+    body = Column(Text, nullable=False)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+    is_read = Column(Boolean, default=False)
+
+    # Relationships
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])

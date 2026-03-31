@@ -387,6 +387,7 @@ def kiosk_clock_action(
 
         record = StaffClockIn(
             staff_id=staff.id,
+            date=today,
             clock_in_time=now,
             flagged=flagged,
             flag_reason=f"Arrived late - {time_str}" if flagged else None

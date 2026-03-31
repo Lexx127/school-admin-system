@@ -9,6 +9,8 @@ const TABS = {
   STUDENTS: 'students',
   STAFF: 'staff',
   PARENTS: 'parents',
+  FEES: 'fees',
+  COMMUNICATIONS: 'communications',
 }
 
 export default function AdminDashboard() {
@@ -18,8 +20,18 @@ export default function AdminDashboard() {
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState(TABS.OVERVIEW)
+  const [inbox, setInbox] = useState([])
+  const [messageForm, setMessageForm] = useState({ receiver_id: '', subject: '', body: '' })
+  const [recipientSearch, setRecipientSearch] = useState('')
+  const [showRecipientDropdown, setShowRecipientDropdown] = useState(false)
+
+  const [allFees, setAllFees] = useState([])
+  const [studentRecords, setStudentRecords] = useState([])
+  const [feeView, setFeeView] = useState('all')
 
   // Create forms
+  const [newFeeForm, setNewFeeForm] = useState({ student_id: '', academic_year: '2026', term: 'Term 1', amount_due: '', due_date: '' })
+  const [paymentForm, setPaymentForm] = useState({ fee_id: null, amount_paid: '', payment_method: 'Cash' })
   const [studentForm, setStudentForm] = useState({ first_name: '', last_name: '', email: '', password: '', student_number: '', class_id: '', grade_level: '' })
   const [staffForm, setStaffForm] = useState({ first_name: '', last_name: '', email: '', password: '', job_title: '', role: 'TEACHER' })
   const [parentForm, setParentForm] = useState({ first_name: '', last_name: '', email: '', password: '', whatsapp_number: '' })
@@ -33,10 +45,14 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      const [userData, usersData, dashData] = await Promise.allSettled([
+      const [userData, usersData, dashData, feesData, studentsData, parentsSubData, inboxData] = await Promise.allSettled([
         api.get('/auth/me'),
         api.get('/users/admin/all'),
         api.get('/users/classes/all'),
+        api.get('/fees/all/summary'),
+        api.get('/users/students/all'),
+        api.get('/users/parents/with-students'),
+        api.get('/communications/inbox'),
       ])
 
       if (userData.status === 'rejected') { router.push('/'); return }
@@ -45,12 +61,32 @@ export default function AdminDashboard() {
       if (dashData.status === 'fulfilled') {
          setClasses(dashData.value || [])
       }
-    
+      if (feesData.status === 'fulfilled') setAllFees(feesData.value)
+      if (studentsData.status === 'fulfilled') setStudentRecords(studentsData.value)
+      // parentsSubData is for reference if needed, but setParentsList doesn't exist here
+      if (inboxData.status === 'fulfilled') setInbox(inboxData.value)
 
       setLoading(false)
     }
     loadData()
   }, [])
+
+  useEffect(() => {
+    if (tab === TABS.FEES) {
+      fetchFees(feeView)
+    }
+  }, [tab, feeView])
+
+  const fetchFees = async (view) => {
+    let endpoint = '/fees/all/summary';
+    if (view === 'pending') endpoint = '/fees/pending';
+    if (view === 'paid') endpoint = '/fees/paid';
+    try {
+      const res = await api.get(endpoint);
+      setAllFees(res);
+      setFeeView(view);
+    } catch (err) { console.error(err); }
+  }
 
   async function handleLogout() {
     await api.post('/auth/logout')
@@ -216,6 +252,8 @@ export default function AdminDashboard() {
             { name: 'Students', icon: '👨‍🎓', key: TABS.STUDENTS, count: students.length },
             { name: 'Staff', icon: '👨‍🏫', key: TABS.STAFF, count: staff.length },
             { name: 'Parents', icon: '👨‍👩‍👧', key: TABS.PARENTS, count: parents.length },
+            { name: 'Fees Management', icon: '💰', key: TABS.FEES },
+            { name: 'Communications', icon: '💬', key: TABS.COMMUNICATIONS },
           ].map(item => (
             <div key={item.key}
               onClick={() => { setTab(item.key); setFormError(''); setFormSuccess('') }}
@@ -812,6 +850,223 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── FEES TAB ── */}
+        {tab === TABS.FEES && (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Fees Management</h2>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+              {/* Create Fee Form */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Create New Fee Charge</h3>
+                <form onSubmit={async(e) => {
+                  e.preventDefault();
+                  try {
+                    await api.post('/fees/', newFeeForm);
+                    alert("Fee charge created!");
+                    setNewFeeForm({ student_id: '', academic_year: '2026', term: 'Term 1', amount_due: '', due_date: '' });
+                    fetchFees(feeView);
+                  } catch (err) { alert("Error creating fee"); }
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <select required value={newFeeForm.student_id} onChange={e => setNewFeeForm({...newFeeForm, student_id: parseInt(e.target.value)})} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}>
+                    <option value="">-- Select Student --</option>
+                    {studentRecords.map(s => <option key={s.student_id} value={s.student_id}>{s.first_name} {s.last_name} ({s.student_number})</option>)}
+                  </select>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <input required type="text" placeholder="Year (e.g. 2026)" value={newFeeForm.academic_year} onChange={e => setNewFeeForm({...newFeeForm, academic_year: e.target.value})} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }} />
+                    <input required type="text" placeholder="Term (e.g. Term 1)" value={newFeeForm.term} onChange={e => setNewFeeForm({...newFeeForm, term: e.target.value})} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <input required type="number" placeholder="Amount Due ($)" value={newFeeForm.amount_due} onChange={e => setNewFeeForm({...newFeeForm, amount_due: parseFloat(e.target.value)})} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }} />
+                    <input required type="date" value={newFeeForm.due_date} onChange={e => setNewFeeForm({...newFeeForm, due_date: e.target.value})} style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }} />
+                  </div>
+                  <button type="submit" style={{ padding: '10px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Charge Fee</button>
+                </form>
+              </div>
+
+              {/* Record Payment Form */}
+              <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)', marginBottom: '16px' }}>Record Payment</h3>
+                <form onSubmit={async(e) => {
+                  e.preventDefault();
+                  if (!paymentForm.fee_id) return alert("Please select a fee from the table below first.");
+                  try {
+                    await api.post(`/fees/${paymentForm.fee_id}/pay`, { amount_paid: parseFloat(paymentForm.amount_paid), payment_method: paymentForm.payment_method });
+                    alert("Payment recorded! Parent has been notified directly via system message.");
+                    setPaymentForm({ fee_id: null, amount_paid: '', payment_method: 'Cash' });
+                    fetchFees(feeView);
+                  } catch (err) { alert("Error recording payment"); }
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ padding: '8px', background: '#f5f6fa', borderRadius: '6px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                    Selected Fee ID: {paymentForm.fee_id || 'None'}
+                  </div>
+                  <input required type="number" placeholder="Amount Paid ($)" value={paymentForm.amount_paid} onChange={e => setPaymentForm({...paymentForm, amount_paid: parseFloat(e.target.value)})} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }} />
+                  <select required value={paymentForm.payment_method} onChange={e => setPaymentForm({...paymentForm, payment_method: e.target.value})} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}>
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Card">Card</option>
+                  </select>
+                  <button type="submit" disabled={!paymentForm.fee_id} style={{ padding: '10px', background: '#16a34a', color: 'white', border: 'none', borderRadius: '6px', cursor: paymentForm.fee_id ? 'pointer' : 'not-allowed', opacity: paymentForm.fee_id ? 1 : 0.5, fontWeight: '600' }}>Submit Payment & Notify Parent</button>
+                </form>
+              </div>
+            </div>
+
+            {/* Fees Table */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-dark)' }}>School Ledger</h3>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setFeeView('all')} style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', borderRadius: '6px', border: '1px solid #d1d5db', background: feeView === 'all' ? '#e2e8f0' : 'white', color: 'var(--text-dark)' }}>All Fees</button>
+                <button onClick={() => setFeeView('pending')} style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', borderRadius: '6px', border: '1px solid #d1d5db', background: feeView === 'pending' ? '#fefcbf' : 'white', color: feeView === 'pending' ? '#b45309' : 'var(--text-dark)' }}>Pending / Partial</button>
+                <button onClick={() => setFeeView('paid')} style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', borderRadius: '6px', border: '1px solid #d1d5db', background: feeView === 'paid' ? '#dcfce7' : 'white', color: feeView === 'paid' ? '#16a34a' : 'var(--text-dark)' }}>Fully Paid</button>
+              </div>
+            </div>
+            <div style={{ background: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#fafbfc', borderBottom: '1px solid #eef0f8', textAlign: 'left' }}>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>ID</th>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Student</th>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Term</th>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Amount</th>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Status</th>
+                    <th style={{ padding: '12px 16px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allFees.map(f => (
+                    <tr key={f.fee_id} style={{ borderBottom: '1px solid #f5f6fa' }}>
+                      <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600' }}>#{f.fee_id}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px' }}>{f.student_name}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px' }}>{f.academic_year} {f.term}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: '600' }}>${f.amount_paid}/${f.amount_due}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                         <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', background: f.payment_status === 'PAID' ? '#dcfce7' : f.payment_status === 'PARTIAL' ? '#e0f2fe' : '#fefcbf', color: f.payment_status === 'PAID' ? '#16a34a' : f.payment_status === 'PARTIAL' ? '#0369a1' : '#b45309' }}>
+                          {f.payment_status === 'PAID' ? 'Paid' : f.payment_status === 'PARTIAL' ? 'Partially Paid' : 'Pending'}
+                         </span>
+                      </td>
+                      <td style={{ padding: '12px 16px', fontSize: '13px' }}>
+                        {f.payment_status !== 'PAID' && (
+                          <button onClick={() => setPaymentForm({...paymentForm, fee_id: f.fee_id})} style={{ padding: '6px 14px', background: 'var(--blue-light)', color: 'var(--blue-deep)', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>
+                            Collect
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {allFees.length === 0 && (
+                    <tr><td colSpan="6" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '14px' }}>No fee records found in this view.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        )}
+
+        {tab === TABS.COMMUNICATIONS && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '32px' }}>
+            {/* Inbox */}
+            <div>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Inbox</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {!inbox.length ? (
+                  <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid #eef0f8' }}>
+                    Your inbox is empty
+                  </div>
+                ) : (
+                  inbox.map((msg, i) => (
+                    <div key={i} style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div style={{ fontWeight: '700', color: 'var(--text-dark)' }}>{msg.sender_name} ({msg.sender_role})</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{new Date(msg.sent_at).toLocaleString('en-GB')}</div>
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--blue-deep)', marginBottom: '8px' }}>{msg.subject}</div>
+                      <div style={{ fontSize: '14px', color: 'var(--text-dark)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{msg.body}</div>
+                      <button 
+                        onClick={() => {
+                          setMessageForm({ receiver_id: msg.sender_id, subject: `Re: ${msg.subject}`, body: `\n\n--- Original Message ---\n${msg.body}` })
+                          setRecipientSearch(msg.sender_name)
+                        }}
+                        style={{ marginTop: '16px', background: 'none', border: '1px solid var(--blue-accent)', color: 'var(--blue-accent)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+                      >
+                        Reply
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Compose */}
+            <div>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Compose</h2>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '32px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <form onSubmit={async (e) => {
+                  e.preventDefault()
+                  try {
+                    await api.post('/communications/send', messageForm)
+                    alert('Message sent successfully!')
+                    setMessageForm({ receiver_id: '', subject: '', body: '' })
+                    setRecipientSearch('')
+                    const res = await api.get('/communications/inbox')
+                    setInbox(res)
+                  } catch (err) { alert('Error sending message') }
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ position: 'relative' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Recipient (Staff, Parent, or Student)</label>
+                    <input 
+                      type="text" 
+                      placeholder="Search name..."
+                      value={recipientSearch}
+                      onChange={(e) => {
+                        setRecipientSearch(e.target.value)
+                        setMessageForm({...messageForm, receiver_id: ''})
+                        setShowRecipientDropdown(true)
+                      }}
+                      onFocus={() => setShowRecipientDropdown(true)}
+                      required={!messageForm.receiver_id}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}
+                    />
+                    {showRecipientDropdown && recipientSearch.length > 1 && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #eef0f8', borderRadius: '8px', boxShadow: 'var(--shadow)', maxHeight: '300px', overflowY: 'auto', zIndex: 10 }}>
+                        {allUsers.filter(u => (`${u.first_name} ${u.last_name}`).toLowerCase().includes(recipientSearch.toLowerCase())).map(u => (
+                          <div key={u.user_id} onClick={() => { setMessageForm({...messageForm, receiver_id: u.user_id}); setRecipientSearch(`${u.first_name} ${u.last_name} (${u.role})`); setShowRecipientDropdown(false) }} style={{ padding: '10px 14px', borderBottom: '1px solid #f5f6fa', cursor: 'pointer', fontSize: '13px' }}>
+                            <div style={{ fontWeight: '600', color: 'var(--text-dark)' }}>{u.first_name} {u.last_name} ({u.role})</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{u.email}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Subject</label>
+                    <input 
+                      type="text" 
+                      value={messageForm.subject}
+                      onChange={(e) => setMessageForm({...messageForm, subject: e.target.value})}
+                      required
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Message Body</label>
+                    <textarea 
+                      value={messageForm.body}
+                      onChange={(e) => setMessageForm({...messageForm, body: e.target.value})}
+                      required
+                      rows={6}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px', resize: 'vertical' }}
+                    />
+                  </div>
+                  <button type="submit" style={{ padding: '12px 24px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', alignSelf: 'flex-start' }}>
+                    Send Message
+                  </button>
+                </form>
               </div>
             </div>
           </div>

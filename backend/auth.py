@@ -59,7 +59,18 @@ def get_current_user(
 # Role based access control
 def require_role(*roles: UserRole):
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        if current_user.role not in roles:
+        user_role = current_user.role
+        # Extract values from enums if necessary, otherwise use as-is
+        allowed = []
+        for r in roles:
+            if hasattr(r, 'value'):
+                allowed.append(str(r.value))
+            else:
+                allowed.append(str(r))
+        
+        user_role_str = str(user_role.value) if hasattr(user_role, 'value') else str(user_role)
+        
+        if user_role_str not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to access this resource"

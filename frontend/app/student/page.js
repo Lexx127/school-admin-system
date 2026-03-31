@@ -13,6 +13,12 @@ export default function StudentDashboard() {
   const [notices, setNotices] = useState([])
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('Dashboard')
+  const [inbox, setInbox] = useState([])
+  const [staffList, setStaffList] = useState([])
+  const [messageForm, setMessageForm] = useState({ receiver_id: '', subject: '', body: '' })
+  const [staffSearch, setStaffSearch] = useState('')
+  const [showStaffDropdown, setShowStaffDropdown] = useState(false)
 
   const today = new Date().toLocaleDateString('en-GB', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -20,7 +26,7 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     async function loadData() {
-      const [userData, homeworkData, gradesData, attendanceData, noticeData, eventData] =
+      const [userData, homeworkData, gradesData, attendanceData, noticeData, eventData, inboxData, staffData] =
         await Promise.allSettled([
           api.get('/auth/me'),
           api.get('/homework/student/mine'),
@@ -28,6 +34,8 @@ export default function StudentDashboard() {
           api.get('/attendance/students/me'),
           api.get('/notices/mine'),
           api.get('/notices/events/upcoming'),
+          api.get('/communications/inbox'),
+          api.get('/users/staff/all'),
         ])
 
       if (userData.status === 'rejected') { router.push('/'); return }
@@ -35,9 +43,11 @@ export default function StudentDashboard() {
       if (userData.status === 'fulfilled') setUser(userData.value)
       if (homeworkData.status === 'fulfilled') setHomework(homeworkData.value)
       if (gradesData.status === 'fulfilled') setGrades(gradesData.value.grades_by_subject || [])
-      if (attendanceData.status === 'fulfilled') setAttendance(attendanceData.value.summary || null)
+      if (attendanceData.status === 'fulfilled') setAttendance(attendanceData.value || null)
       if (noticeData.status === 'fulfilled') setNotices(noticeData.value)
       if (eventData.status === 'fulfilled') setEvents(eventData.value)
+      if (inboxData?.status === 'fulfilled') setInbox(inboxData.value)
+      if (staffData?.status === 'fulfilled') setStaffList(staffData.value)
 
       setLoading(false)
     }
@@ -109,11 +119,13 @@ export default function StudentDashboard() {
         <nav style={{ flex: 1, padding: '16px' }}>
           {[
             { label: 'My School', items: [
-              { name: 'Dashboard', icon: '⊞', active: true },
+              { name: 'Dashboard', icon: '⊞' },
               { name: 'Homework', icon: '📖', badge: homework.upcoming?.length || null },
               { name: 'My Grades', icon: '📊' },
               { name: 'Attendance', icon: '✓' },
               { name: 'Notices', icon: '🔔', badge: notices.filter(n => !n.is_read).length || null },
+              { name: 'Events', icon: '📅' },
+              { name: 'Communications', icon: '💬' },
             ]},
           ].map(section => (
             <div key={section.label}>
@@ -123,12 +135,14 @@ export default function StudentDashboard() {
                 padding: '0 12px', marginTop: '24px', marginBottom: '8px',
               }}>{section.label}</div>
               {section.items.map(item => (
-                <div key={item.name} style={{
+                <div key={item.name} 
+                  onClick={() => setActiveTab(item.name)}
+                  style={{
                   display: 'flex', alignItems: 'center', gap: '12px',
                   padding: '10px 12px', borderRadius: '8px',
-                  color: item.active ? '#93c5fd' : 'rgba(255,255,255,0.5)',
-                  background: item.active ? 'rgba(37,99,235,0.15)' : 'transparent',
-                  fontSize: '14px', fontWeight: item.active ? '500' : '400',
+                  color: activeTab === item.name ? '#93c5fd' : 'rgba(255,255,255,0.5)',
+                  background: activeTab === item.name ? 'rgba(37,99,235,0.15)' : 'transparent',
+                  fontSize: '14px', fontWeight: activeTab === item.name ? '500' : '400',
                   cursor: 'pointer', marginBottom: '2px',
                 }}>
                   <span>{item.icon}</span>
@@ -176,7 +190,8 @@ export default function StudentDashboard() {
 
       {/* MAIN CONTENT */}
       <div style={{ marginLeft: '260px', flex: 1, padding: '40px 48px' }}>
-
+        {activeTab === 'Dashboard' ? (
+          <>
         {/* Header */}
         <div style={{ marginBottom: '36px' }}>
           <h1 style={{
@@ -270,7 +285,7 @@ export default function StudentDashboard() {
                   No upcoming assignments 🎉
                 </div>
               ) : (
-                homework.upcoming.map((a, i) => {
+                homework.upcoming.slice(0, 3).map((a, i) => {
                   const due = new Date(a.due_date)
                   const daysLeft = Math.ceil((due - new Date()) / (1000 * 60 * 60 * 24))
                   return (
@@ -328,7 +343,7 @@ export default function StudentDashboard() {
                   No released grades yet
                 </div>
               ) : (
-                grades.map((g, i) => (
+                grades.slice(0, 3).map((g, i) => (
                   <div key={i} style={{ padding: '16px 24px', borderBottom: '1px solid #f5f6fa' }}>
                     <div style={{
                       display: 'flex', justifyContent: 'space-between',
@@ -379,7 +394,7 @@ export default function StudentDashboard() {
                     Past Assignments
                   </h3>
                 </div>
-                {homework.past.map((a, i) => (
+                {homework.past.slice(0, 3).map((a, i) => (
                   <div key={i} style={{
                     padding: '16px 24px', borderBottom: '1px solid #f5f6fa',
                     display: 'flex', alignItems: 'center', gap: '16px',
@@ -542,6 +557,304 @@ export default function StudentDashboard() {
 
           </div>
         </div>
+          </>
+        ) : activeTab === 'Homework' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Upcoming Assignments</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+              {!homework.upcoming?.length ? <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No upcoming assignments 🎉</p> : homework.upcoming.map((a, i) => (
+                <div key={i} style={{ padding: '16px', borderBottom: '1px solid #f5f6fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div style={{ width: '40px', height: '40px', background: 'var(--blue-light)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', color: 'var(--blue-deep)', flexShrink: 0 }}>
+                      {a.subject_name?.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: '600', color: 'var(--text-dark)' }}>{a.title}</div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>{a.subject_name} · {a.teacher_name} · {a.max_marks} marks</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: '600', color: 'var(--blue-deep)' }}>Due: {new Date(a.due_date).toLocaleDateString('en-GB')}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {homework.past?.length > 0 && (
+              <div style={{ marginTop: '32px', background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: 'var(--text-dark)' }}>Past Assignments</h3>
+                {homework.past.map((a, i) => (
+                  <div key={i} style={{ padding: '16px', borderBottom: '1px solid #f5f6fa', display: 'flex', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontWeight: '600', color: 'var(--text-dark)' }}>{a.title}</div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>{a.subject_name}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      {a.grade ? (
+                        <>
+                          <div style={{ fontSize: '14px', fontWeight: '700', color: (a.grade.marks_obtained / a.max_marks * 100) >= 75 ? '#16a34a' : (a.grade.marks_obtained / a.max_marks * 100) >= 50 ? '#e67e22' : '#c0392b' }}>
+                            {a.grade.marks_obtained}/{a.max_marks}
+                          </div>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', background: '#f5f6fa', padding: '4px 8px', borderRadius: '4px' }}>Not yet released</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'My Grades' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>My Grades</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+              {!grades.length ? <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No released grades yet.</p> : grades.map((g, i) => (
+                <div key={i} style={{ padding: '16px', borderBottom: '1px solid #f5f6fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: '600', color: 'var(--text-dark)' }}>{g.subject_name}</div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{g.grade_count} assessment{g.grade_count !== 1 ? 's' : ''}</div>
+                  </div>
+                  <div style={{ fontWeight: '700', fontSize: '18px', color: g.overall_percentage >= 75 ? '#16a34a' : g.overall_percentage >= 50 ? '#e67e22' : '#c0392b' }}>
+                    {Math.round(g.overall_percentage)}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : activeTab === 'Notices' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>School Notices</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {!notices.length ? (
+                <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                  No notices available.
+                </div>
+              ) : (
+                notices.map((n, i) => (
+                  <div key={i} style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', borderLeft: n.is_pinned ? '4px solid var(--blue-accent)' : '1px solid #eef0f8' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                      <div>
+                        <div style={{
+                          display: 'inline-block', padding: '4px 10px', borderRadius: '4px',
+                          fontSize: '11px', fontWeight: '600', textTransform: 'uppercase',
+                          letterSpacing: '0.06em', marginBottom: '8px',
+                          background: n.is_pinned ? 'var(--blue-light)' : '#f0f4ff',
+                          color: n.is_pinned ? 'var(--blue-deep)' : 'var(--blue-accent)',
+                        }}>
+                          {n.is_pinned ? '📌 Pinned Announcement' : `To: ${n.audience}`}
+                        </div>
+                        <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-dark)', lineHeight: '1.4' }}>
+                          {n.title}
+                        </h3>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)' }}>
+                          {n.created_by}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '15px', color: 'var(--text-dark)', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      {n.body}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : activeTab === 'Attendance' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>My Attendance</h2>
+            {!attendance ? (
+              <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>No attendance records yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px' }}>
+                  {[
+                    { label: 'Total Days', value: attendance.summary?.total_days ?? attendance.total_days ?? 0, color: 'var(--blue-accent)' },
+                    { label: 'Present', value: attendance.summary?.days_attended ?? attendance.days_attended ?? 0, color: '#16a34a' },
+                    { label: 'Absent', value: attendance.summary?.days_absent ?? attendance.days_absent ?? 0, color: '#c0392b' },
+                    { label: 'Late', value: attendance.summary?.days_late ?? attendance.days_late ?? 0, color: '#e67e22' },
+                  ].map((s, i) => (
+                    <div key={i} style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', textAlign: 'center' }}>
+                      <div style={{ fontFamily: 'var(--font-playfair)', fontSize: '36px', fontWeight: '700', color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#fafbfc', borderBottom: '1px solid #eef0f8', textAlign: 'left' }}>
+                        {['Date', 'Day', 'Status', 'Notes'].map(h => <th key={h} style={{ padding: '14px 24px', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(attendance.records || []).map((r, i) => {
+                        const d = new Date(r.date)
+                        const statusColor = r.status === 'PRESENT' ? '#16a34a' : r.status === 'ABSENT' ? '#c0392b' : '#e67e22'
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid #f5f6fa' }}>
+                            <td style={{ padding: '14px 24px', fontSize: '14px', color: 'var(--text-dark)', fontWeight: '500' }}>{d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                            <td style={{ padding: '14px 24px', fontSize: '13px', color: 'var(--text-muted)' }}>{d.toLocaleDateString('en-GB', { weekday: 'long' })}</td>
+                            <td style={{ padding: '14px 24px' }}>
+                              <span style={{ padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', background: `${statusColor}18`, color: statusColor }}>{r.status}</span>
+                            </td>
+                            <td style={{ padding: '14px 24px', fontSize: '13px', color: 'var(--text-muted)' }}>{r.notes || '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'Events' ? (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Upcoming Events</h2>
+            {!events.length ? (
+              <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>No upcoming events.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {events.map((e, i) => {
+                  const d = new Date(e.start_datetime)
+                  const end = e.end_datetime ? new Date(e.end_datetime) : null
+                  return (
+                    <div key={i} style={{ background: 'white', borderRadius: '12px', padding: '24px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8', display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
+                      <div style={{ textAlign: 'center', flexShrink: 0, width: '56px', background: 'var(--blue-light)', borderRadius: '10px', padding: '10px 0' }}>
+                        <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--blue-accent)', fontWeight: '600' }}>{d.toLocaleDateString('en-GB', { month: 'short' })}</div>
+                        <div style={{ fontFamily: 'var(--font-playfair)', fontSize: '28px', color: 'var(--blue-deep)', fontWeight: '700', lineHeight: '1' }}>{d.getDate()}</div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <h3 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-dark)' }}>{e.title}</h3>
+                          <span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', background: '#f0f4ff', color: 'var(--blue-accent)' }}>{e.event_type}</span>
+                        </div>
+                        {e.description && <p style={{ fontSize: '14px', color: 'var(--text-muted)', lineHeight: '1.5', marginBottom: '8px' }}>{e.description}</p>}
+                        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                          {e.location && <span>📍 {e.location}</span>}
+                          <span>🕐 {d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}{end ? ` – ${end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'Communications' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '32px' }}>
+            {/* Inbox */}
+            <div>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Inbox</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {!inbox.length ? (
+                  <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid #eef0f8' }}>
+                    Your inbox is empty
+                  </div>
+                ) : (
+                  inbox.map((msg, i) => (
+                    <div key={i} style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div style={{ fontWeight: '700', color: 'var(--text-dark)' }}>{msg.sender_name} ({msg.sender_role})</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{new Date(msg.sent_at).toLocaleString('en-GB')}</div>
+                      </div>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--blue-deep)', marginBottom: '8px' }}>{msg.subject}</div>
+                      <div style={{ fontSize: '14px', color: 'var(--text-dark)', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{msg.body}</div>
+                      <button 
+                        onClick={() => {
+                          setMessageForm({ receiver_id: msg.sender_id, subject: `Re: ${msg.subject}`, body: `\n\n--- Original Message ---\n${msg.body}` })
+                          setStaffSearch(msg.sender_name)
+                        }}
+                        style={{ marginTop: '16px', background: 'none', border: '1px solid var(--blue-accent)', color: 'var(--blue-accent)', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}
+                      >
+                        Reply
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Compose */}
+            <div>
+              <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>Compose</h2>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '32px', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+                <form onSubmit={async (e) => {
+                  e.preventDefault()
+                  try {
+                    await api.post('/communications/send', messageForm)
+                    alert('Message sent successfully!')
+                    setMessageForm({ receiver_id: '', subject: '', body: '' })
+                    setStaffSearch('')
+                    const res = await api.get('/communications/inbox')
+                    setInbox(res)
+                  } catch (err) { alert('Error sending message') }
+                }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ position: 'relative' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Recipient (School Staff)</label>
+                    <input 
+                      type="text" 
+                      placeholder="Search staff name or role..."
+                      value={staffSearch}
+                      onChange={(e) => {
+                        setStaffSearch(e.target.value)
+                        setMessageForm({...messageForm, receiver_id: ''})
+                        setShowStaffDropdown(true)
+                      }}
+                      onFocus={() => setShowStaffDropdown(true)}
+                      required={!messageForm.receiver_id}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}
+                    />
+                    {showStaffDropdown && staffSearch.length > 1 && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'white', border: '1px solid #eef0f8', borderRadius: '8px', boxShadow: 'var(--shadow)', maxHeight: '300px', overflowY: 'auto', zIndex: 10 }}>
+                        {staffList.filter(s => (s.first_name + ' ' + s.last_name).toLowerCase().includes(staffSearch.toLowerCase()) || s.role.toLowerCase().includes(staffSearch.toLowerCase())).map(s => (
+                          <div key={s.user_id} onClick={() => { setMessageForm({...messageForm, receiver_id: s.user_id}); setStaffSearch(`${s.first_name} ${s.last_name} (${s.role})`); setShowStaffDropdown(false) }} style={{ padding: '10px 14px', borderBottom: '1px solid #f5f6fa', cursor: 'pointer', fontSize: '13px' }}>
+                            <div style={{ fontWeight: '600', color: 'var(--text-dark)' }}>{s.first_name} {s.last_name} ({s.role})</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.department || ''}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Subject</label>
+                    <input 
+                      type="text" 
+                      value={messageForm.subject}
+                      onChange={(e) => setMessageForm({...messageForm, subject: e.target.value})}
+                      required
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: 'var(--text-dark)', marginBottom: '8px' }}>Message</label>
+                    <textarea 
+                      value={messageForm.body}
+                      onChange={(e) => setMessageForm({...messageForm, body: e.target.value})}
+                      required
+                      rows={6}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '14px', resize: 'vertical' }}
+                    />
+                  </div>
+                  <button type="submit" style={{ padding: '12px 24px', background: 'var(--blue-deep)', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', alignSelf: 'flex-start' }}>
+                    Send Message
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-playfair)', fontSize: '24px', color: 'var(--text-dark)', marginBottom: '16px' }}>{activeTab}</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '32px', textAlign: 'center', color: 'var(--text-muted)', boxShadow: 'var(--shadow)', border: '1px solid #eef0f8' }}>
+              Content for {activeTab} is under construction...
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

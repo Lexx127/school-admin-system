@@ -115,6 +115,32 @@ def update_assignment(
     return {"message": "Assignment updated successfully"}
 
 
+# --- Delete Assignment (Teacher) ---
+@router.delete("/delete/{assignment_id}")
+def delete_assignment(
+    assignment_id: int,
+    current_user: User = Depends(require_role(UserRole.TEACHER, UserRole.PRINCIPAL, UserRole.SUPER_ADMIN)),
+    db: Session = Depends(get_db)
+):
+    staff = db.query(Staff).filter(Staff.user_id == current_user.id).first()
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff profile not found")
+
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if assignment.created_by != staff.id:  # type: ignore
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own assignments"
+        )
+
+    db.delete(assignment)
+    db.commit()
+    return {"message": "Assignment deleted successfully"}
+
+
 # --- Get Teacher's Assignments ---
 @router.get("/teacher/mine")
 def get_my_assignments(
@@ -131,18 +157,26 @@ def get_my_assignments(
 
     result = []
     for a in assignments:
-        result.append({
-            "assignment_id": a.id,
-            "title": a.title,
-            "description": a.description,
-            "due_date": a.due_date,
-            "max_marks": a.max_marks,
-            "class_name": a.class_subject.homeroom_class.name,
-            "subject_name": a.class_subject.subject.name,
-            "is_published": a.is_published,
-            "is_past_due": a.due_date < date.today(),  # type: ignore
-            "grades_entered": len(a.grades)
-        })
+            # Calculate valid students: only count students who were enrolled before or exactly on the due date
+            valid_students = [
+                s for s in a.class_subject.homeroom_class.students
+                if s.user.created_at.date() <= a.due_date
+            ]
+
+            result.append({
+                "assignment_id": a.id,
+                "title": a.title,
+                "description": a.description,
+                "due_date": a.due_date,
+                "max_marks": a.max_marks,
+                "class_id": a.class_subject.homeroom_class.id,
+                "class_name": a.class_subject.homeroom_class.name,
+                "subject_name": a.class_subject.subject.name,
+                "is_published": a.is_published,
+                "is_past_due": a.due_date < date.today(),  # type: ignore
+                "grades_entered": len(a.grades),
+                "student_count": len(valid_students)
+            })
 
     return result
 

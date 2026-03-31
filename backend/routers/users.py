@@ -25,20 +25,20 @@ def get_my_profile(current_user: User = Depends(get_current_user), db: Session =
         "phone": current_user.phone,
     }
 
-    if current_user.role == UserRole.TEACHER: # type: ignore
+    if current_user.role == UserRole.TEACHER:  # type: ignore
         staff = db.query(Staff).filter(Staff.user_id == current_user.id).first()
         if staff:
             base["employee_number"] = staff.employee_number
             base["department"] = staff.department
             base["job_title"] = staff.job_title
 
-    elif current_user.role == UserRole.STUDENT: # type: ignore
+    elif current_user.role == UserRole.STUDENT:  # type: ignore
         student = db.query(Student).filter(Student.user_id == current_user.id).first()
         if student:
             base["student_number"] = student.student_number
             base["grade_level"] = student.grade_level
 
-    elif current_user.role == UserRole.PARENT: # type: ignore
+    elif current_user.role == UserRole.PARENT:  # type: ignore
         parent = db.query(Parent).filter(Parent.user_id == current_user.id).first()
         if parent:
             children = []
@@ -205,6 +205,7 @@ def get_principal_dashboard(
         "classes": classes_summary,
         "staff": staff_summary
     }
+
 
 # --- Pydantic Schemas for Admin ---
 class UserCreate(BaseModel):
@@ -374,20 +375,24 @@ def link_parent_student(
     current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL)),
     db: Session = Depends(get_db)
 ):
-    existing = db.query(ParentStudent).filter(
-        ParentStudent.parent_id == request.parent_id,
-        ParentStudent.student_id == request.student_id
-    ).first()
+    parent = db.query(Parent).filter(Parent.user_id == request.parent_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent record not found")
 
+    student = db.query(Student).filter(Student.user_id == request.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student record not found")
+
+    existing = db.query(ParentStudent).filter(
+        ParentStudent.parent_id == parent.id,
+        ParentStudent.student_id == student.id
+    ).first()
     if existing:
-        raise HTTPException(
-            status_code=400,
-            detail="This parent is already linked to this student"
-        )
+        raise HTTPException(status_code=400, detail="This parent is already linked to this student")
 
     association = ParentStudent(
-        parent_id=request.parent_id,
-        student_id=request.student_id,
+        parent_id=parent.id,
+        student_id=student.id,
         relationship_type=request.relationship_type
     )
     db.add(association)
@@ -410,7 +415,7 @@ def toggle_user_active(
     user.is_active = not user.is_active  # type: ignore
     db.commit()
 
-    status = "activated" if user.is_active else "deactivated" # type: ignore
+    status = "activated" if user.is_active else "deactivated"  # type: ignore
     return {
         "message": f"User {status} successfully",
         "user_id": user_id,
@@ -425,7 +430,6 @@ def get_all_users(
     db: Session = Depends(get_db)
 ):
     users = db.query(User).order_by(User.role, User.last_name).all()
-
     return [
         {
             "user_id": u.id,
@@ -439,3 +443,146 @@ def get_all_users(
         for u in users
     ]
 
+
+@router.get("/parents/with-students")
+def get_parents_with_students(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER)),
+    db: Session = Depends(get_db)
+):
+    parents = db.query(Parent).all()
+    result = []
+    for p in parents:
+        children = []
+        for assoc in p.student_associations:
+            child = assoc.student.user
+            children.append(f"{child.first_name} {child.last_name}")
+        result.append({
+            "user_id": p.user_id,
+            "first_name": p.user.first_name,
+            "last_name": p.user.last_name,
+            "email": p.user.email,
+            "children_names": children
+        })
+    return result
+
+
+@router.get("/classes/all")
+def get_all_classes(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER)),
+    db: Session = Depends(get_db)
+):
+    classes = db.query(Class).all()
+    return [{"class_id": c.id, "class_name": c.name} for c in classes]
+
+
+@router.get("/staff/all")
+def get_messaging_staff(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER, UserRole.PARENT)),
+    db: Session = Depends(get_db)
+):
+    staff = db.query(Staff).all()
+    return [
+        {
+            "user_id": s.user_id,
+            "name": f"{s.user.first_name} {s.user.last_name}",
+            "role": s.user.role,
+            "department": s.department,
+            "job_title": s.job_title
+        }
+        for s in staff
+    ]
+
+
+@router.get("/parents/all")
+def get_messaging_parents(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER)),
+    db: Session = Depends(get_db)
+):
+    parents = db.query(Parent).all()
+    return [
+        {
+            "user_id": p.user_id,
+            "name": f"{p.user.first_name} {p.user.last_name}",
+            "email": p.user.email
+        }
+        for p in parents
+    ]
+
+
+@router.get("/classes/{class_id}/info")
+def get_class_details(
+    class_id: int,
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER)),
+    db: Session = Depends(get_db)
+):
+    from models import StudentAttendance, AttendanceStatus
+
+    cls = db.query(Class).filter(Class.id == class_id).first()
+    if not cls:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    students_data = []
+    for student in cls.students:
+        parents = [
+            f"{assoc.parent.user.first_name} {assoc.parent.user.last_name}"
+            for assoc in student.parent_associations
+        ]
+
+        subject_grades: dict = {}
+        for grade in student.grades:
+            subj_name = grade.assignment.class_subject.subject.name
+            if subj_name not in subject_grades:
+                subject_grades[subj_name] = {"earned": 0, "possible": 0}
+            if grade.marks_awarded is not None and grade.assignment.max_marks is not None:
+                subject_grades[subj_name]["earned"] += grade.marks_awarded
+                subject_grades[subj_name]["possible"] += grade.assignment.max_marks
+
+        grades_by_subject = []
+        total_earned = 0
+        total_possible = 0
+        for subj, data in subject_grades.items():
+            if data["possible"] > 0:
+                perc = (data["earned"] / data["possible"]) * 100
+                grades_by_subject.append({"subject": subj, "percentage": round(perc, 1)})
+                total_earned += data["earned"]
+                total_possible += data["possible"]
+
+        average_grade = round((total_earned / total_possible) * 100, 1) if total_possible > 0 else None
+
+        total_days = len(student.attendance_records)
+        present_days = sum(
+            1 for a in student.attendance_records
+            if a.status in [AttendanceStatus.PRESENT, AttendanceStatus.LATE]
+        )
+        attendance_percentage = round((present_days / total_days) * 100, 1) if total_days > 0 else None
+
+        students_data.append({
+            "student_id": student.id,
+            "name": f"{student.user.first_name} {student.user.last_name}",
+        })
+
+    return {
+        "class_id": cls.id,
+        "class_name": cls.name,
+        "students": students_data
+    }
+
+
+@router.get("/students/all")
+def get_all_students(
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.PRINCIPAL, UserRole.TEACHER)),
+    db: Session = Depends(get_db)
+):
+    students = db.query(Student).all()
+    return [
+        {
+            "student_id": s.id,
+            "user_id": s.user_id,
+            "student_number": s.student_number,
+            "first_name": s.user.first_name,
+            "last_name": s.user.last_name,
+            "grade_level": s.grade_level,
+            "class_name": s.homeroom_class.name if s.homeroom_class else None
+        }
+        for s in students
+    ]
